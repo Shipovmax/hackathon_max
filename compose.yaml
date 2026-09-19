@@ -1,0 +1,68 @@
+x-backend: &backend
+  build: .
+  image: shiftcontrol-backend
+  env_file: .env
+  environment:
+    POSTGRES_HOST: db
+    MAX_CA_BUNDLE: /app/certs/Russian_Trusted_Root_CA.cer
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-shiftcontrol}
+      POSTGRES_USER: ${POSTGRES_USER:-shiftcontrol}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shiftcontrol}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    <<: *backend
+    command: python manage.py migrate --noinput
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    <<: *backend
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --access-logfile -
+    ports:
+      - "8000:8000"
+    volumes:
+      - media:/app/backend/media
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    <<: *backend
+    command: python manage.py run_bot
+    volumes:
+      - media:/app/backend/media
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  scheduler:
+    <<: *backend
+    command: python manage.py run_scheduler
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
+  media:

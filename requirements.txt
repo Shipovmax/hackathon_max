@@ -1,0 +1,2 @@
+# Python dependencies are pinned in backend/requirements.txt (the Docker image installs that file).
+-r backend/requirements.txt
