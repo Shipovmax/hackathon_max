@@ -216,12 +216,66 @@ docker compose up          # запустить снова
 docker compose down -v     # остановить и удалить данные БД и фото
 ```
 
+## Деплой на сервер (Ubuntu, https)
+
+Нужны сервер с Ubuntu 24.04 (от 2 ГБ RAM), открытые порты 22, 80 и 443 и доменное имя, которое указывает на IP сервера. Без своего домена подойдёт адрес вида `<IP через дефисы>.sslip.io`: для 130.193.35.250 это `130-193-35-250.sslip.io`. Https-сертификат получает и продлевает Caddy сам.
+
+Один раз на сервере (по SSH):
+
+```bash
+git clone https://github.com/Shipovmax/hackathon_max.git
+cd hackathon_max
+bash deploy/server-setup.sh     # Docker, Compose и swap; после него выйти и зайти по SSH заново
+```
+
+Настроить `.env` (секреты лежат только на сервере, в git их нет):
+
+```bash
+cd ~/hackathon_max
+cp .env.example .env
+nano .env
+```
+
+Значения для сервера, где `<домен>` это, например, `130-193-35-250.sslip.io`:
+
+```
+BOT_TOKEN=<токен бота>
+DJANGO_DEBUG=0
+DJANGO_SECRET_KEY=<вывод команды: python3 -c "import secrets; print(secrets.token_urlsafe(50))">
+DJANGO_ALLOWED_HOSTS=<домен>,localhost,127.0.0.1
+DJANGO_CSRF_TRUSTED_ORIGINS=https://<домен>
+DOMAIN=<домен>
+PUBLIC_BASE_URL=https://<домен>
+POSTGRES_PASSWORD=<длинный случайный пароль>
+```
+
+Запуск и проверка:
+
+```bash
+docker compose --profile prod up -d --build
+curl https://<домен>/api/health/                 # {"status":"ok"}
+docker compose exec web python manage.py createsuperuser
+docker compose logs -f bot                       # в логе должно быть: polling as @...
+```
+
+Обновление после `git push`: `git pull && docker compose --profile prod up -d --build`.
+
+Если образы не скачиваются (Docker Hub бывает недоступен из России), добавьте зеркало и повторите запуск:
+
+```bash
+echo '{"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
+sudo systemctl restart docker
+```
+
+Бот на сервере работает через Long Polling, поэтому локальный `run_bot` на это время нужно остановить: с одним токеном два опроса мешают друг другу.
+
 ## Структура репозитория
 
 ```
 backend/     Django: apps/core (модели, домен), apps/api (REST), apps/bot (бот, планировщик)
 frontend/    мини-приложение: React + MAX UI + MAX Bridge
 certs/       корневой сертификат для API MAX
+deploy/      Caddyfile (https) и скрипт настройки сервера
 docs/        макеты экранов
 CLAUDE.md    контекст проекта: продукт, решения, факты о платформе MAX, план
 Dockerfile, compose.yaml, .env.example, .dockerignore

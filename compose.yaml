@@ -35,7 +35,7 @@ services:
     <<: *backend
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --access-logfile -
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - media:/app/backend/media
     depends_on:
@@ -63,6 +63,24 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["prod"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
 volumes:
   pgdata:
   media:
+  caddy_data:
+  caddy_config:
