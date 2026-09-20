@@ -70,8 +70,10 @@ def on_bot_started(client, update: dict) -> None:
             text=texts.WELCOME_BACK_OWNER,
             buttons=keyboards.open_app(),
         )
-    else:
+    elif bound_employee(account):
         client.send_message(user_id=account.max_user_id, text=texts.WELCOME_BACK_EMPLOYEE)
+    else:
+        client.send_message(user_id=account.max_user_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
 
 
 def on_role_chosen(client, account: MaxAccount, callback_id: str, role: str) -> None:

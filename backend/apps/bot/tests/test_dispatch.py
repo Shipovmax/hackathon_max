@@ -68,6 +68,11 @@ class DispatchTests(TestCase):
         self.assertEqual(self.client.answers, [("cb-1", texts.ROLE_OWNER_CHOSEN)])
         self.assertEqual(self.client.sent[0]["buttons"][0][0]["type"], "link")
 
+    def test_restart_asks_unbound_employee_for_the_code(self):
+        MaxAccount.objects.create(max_user_id=5001, role=Role.EMPLOYEE)
+        dispatch(self.client, bot_started())
+        self.assertEqual(self.client.sent[0]["text"], texts.ROLE_EMPLOYEE_ASK_CODE)
+
     def test_role_command_asks_role_again(self):
         MaxAccount.objects.create(max_user_id=5001, role=Role.EMPLOYEE)
         dispatch(self.client, message("/role"))
