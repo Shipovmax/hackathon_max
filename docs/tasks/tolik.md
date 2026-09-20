@@ -1,0 +1,118 @@
+# Толик — ядро, API, инфраструктура
+
+Прочитай `CLAUDE.md` целиком перед началом. Здесь только твои задачи.
+
+## Твоя зона
+
+Правишь: `backend/apps/core/`, `backend/apps/api/`, `deploy/`, `compose.yaml`, `Dockerfile`,
+`.env.example`, `README.md`, `CLAUDE.md`, `docs/`.
+
+Не трогаешь: `backend/apps/bot/` (Яша), `frontend/` (Максим).
+
+Ты единственный, кто меняет модели и создаёт миграции. Если Яше или Максиму понадобилось
+новое поле — они пишут тебе, ты добавляешь поле и миграцию.
+
+Ветка: `feature/core`.
+
+## Задачи по порядку
+
+Первые три задачи разблокируют остальных, поэтому их делаем раньше всего.
+
+### T1. Сводка и карточка точки (разблокирует Максима)
+
+`GET /api/dashboard/` — список точек владельца за сегодня. Для каждой: `id`, `name`,
+`done` (выполнено задач), `total`, `health` (`ok` / `overdue` / `unclaimed`),
+`last_event_label` (например «открытие в 09:40» или «последнее 14:20»). Точки с проблемами
+идут первыми.
+
+`GET /api/stores/{id}/day/?date=YYYY-MM-DD` — день точки: кто на смене, задачи в хронологии
+со статусами, кто отметил и во сколько, ссылка на фото. Без `date` — сегодня.
+
+Формы ответов уже описаны в `frontend/src/api/types.ts` — держись их, иначе Максиму
+придётся переделывать. Проверяй, что владелец видит только свою сеть.
+
+Проверка: `python manage.py seed_demo --owner-max-id <твой MAX id>`, затем запрос к API
+должен вернуть три точки, где «Ленина, 14» первая и с просрочкой.
+
+### T2. Проверка права на отметку (разблокирует Яшу)
+
+`apps/core/domain/permissions.py`, функция `check_can_mark(employee, instance, now)`.
+
+Правила в `CLAUDE.md`, раздел 4. Возвращает `MarkDecision(allowed, denial)`, где `denial` —
+одно из `day_off`, `not_started`, `ended`, `already_done`. Учитывай только опубликованные
+смены, часовой пояс точки и допуск на границах (`SHIFT_BOUNDARY_TOLERANCE_MINUTES`).
+
+Тесты в `backend/apps/core/tests/test_permissions.py` (папку создай): смена идёт, смена не
+началась, смена закончилась, выходной, задача уже выполнена, граница смены в пределах допуска.
+
+### T3. Жизненный цикл задачи (разблокирует Яшу)
+
+`apps/core/domain/lifecycle.py`:
+
+- `planned_at(instance)` — плановый момент с учётом часового пояса точки;
+- `evaluate_status(instance, now)` — какой статус должен быть сейчас (правила в `CLAUDE.md`, раздел 5);
+- `mark_done(instance, employee, now, photo=None)` — создаёт `Completion`, считает
+  `late_minutes` от планового времени и переводит задачу в `done_on_time` или `done_late`.
+
+Тесты: `backend/apps/core/tests/test_lifecycle.py`.
+
+### T4. Расчёт покрытия
+
+`apps/core/domain/coverage.py`, функция `find_gaps(day_open, day_close, shifts, tolerance_minutes)`:
+слить интервалы смен и вернуть непокрытые куски рабочего дня. Допуск на границах: если
+магазин закрывается в 22:00, а смена до 21:55 — это покрытие, а не окно.
+
+Тесты: `backend/apps/core/tests/test_coverage.py`. Обязательно проверь: полное покрытие,
+дыра в середине, дыра в конце дня, смены внахлёст, смен нет вообще.
+
+### T5. Точки и сотрудники
+
+`GET/POST /api/stores/`, `GET/PATCH /api/stores/{id}/`,
+`GET/POST /api/stores/{id}/employees/`, `POST /api/employees/{id}/invite/` (выдать новый
+одноразовый код), `POST /api/employees/{id}/dismiss/` (деактивировать, историю не удалять).
+
+В списке сотрудников отдавай статус: подключён к боту / код выдан / уволен.
+
+### T6. График смен
+
+`GET /api/stores/{id}/schedule/?week=YYYY-MM-DD` — неделя: сотрудники, смены, статус
+(черновик или опубликован), найденные окна.
+`PUT /api/stores/{id}/schedule/?week=...` — сохранить черновик.
+`GET /api/stores/{id}/schedule/coverage/?week=...` — пересчитать окна.
+`POST /api/stores/{id}/schedule/publish/?week=...` — публикация.
+`PATCH /api/shifts/{id}/` — правка одного дня опубликованной недели с пересчётом покрытия.
+
+### T7. Задачи точки
+
+`GET/POST /api/stores/{id}/task-templates/`, `PATCH/DELETE /api/task-templates/{id}/`.
+Поля: название, тип (ежедневная или разовая на дату), плановое время, допуск, нужно ли фото,
+нужно ли «Беру». Удаление — через `is_active=False`, историю не теряем.
+
+### T8. Фото отметки
+
+`GET /api/completions/{id}/photo/` — отдать файл владельцу этой сети, остальным 403.
+
+### T9. Инфраструктура и сдача
+
+- Переключить сервер на домен, когда заработает DNS: `bash deploy/switch-domain.sh <домен>`.
+- Отправить ссылку на мини-приложение в форму организаторов.
+- Дописать в `README.md` разделы «Основной пользовательский сценарий», «Работа с данными и
+  тестовые данные» и «Пошаговый сценарий проверки» — они нужны для сдачи.
+- Перед дедлайном проверить сборку Docker с нуля и записать commit hash для презентации.
+
+## Как проверять
+
+```bash
+cd backend
+python manage.py test          # все тесты
+python manage.py check
+```
+
+После изменения моделей: `python manage.py makemigrations core` и файл миграции в коммит.
+
+## Деплой
+
+```bash
+ssh -i ~/.ssh/hackathon_vm ubuntu@130.193.35.250
+cd ~/hackathon_max && git pull && docker compose --profile prod up -d --build
+```
