@@ -1,5 +1,4 @@
 x-backend: &backend
-  build: .
   image: shiftcontrol-backend
   env_file: .env
   environment:
@@ -33,6 +32,7 @@ services:
 
   web:
     <<: *backend
+    build: .
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --access-logfile -
     ports:
       - "127.0.0.1:8000:8000"
