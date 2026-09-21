@@ -8,10 +8,11 @@ interface ScreenProps {
   title: string;
   subtitle?: string;
   back?: boolean;
+  action?: ReactNode;
   children: ReactNode;
 }
 
-export function Screen({ title, subtitle, back, children }: ScreenProps) {
+export function Screen({ title, subtitle, back, action, children }: ScreenProps) {
   const navigate = useNavigate();
   const goBack = useCallback(() => navigate(-1), [navigate]);
   useBackButton(back ? goBack : null);
@@ -19,8 +20,11 @@ export function Screen({ title, subtitle, back, children }: ScreenProps) {
   return (
     <div className="screen">
       <div className="screen__header">
-        {subtitle && <Typography.Label variant="medium">{subtitle}</Typography.Label>}
-        <Typography.Title variant="large-strong">{title}</Typography.Title>
+        <div className="screen__titles">
+          {subtitle && <Typography.Label variant="medium">{subtitle}</Typography.Label>}
+          <Typography.Title variant="large-strong">{title}</Typography.Title>
+        </div>
+        {action}
       </div>
       {children}
     </div>
