@@ -1,11 +1,18 @@
 from datetime import datetime, timedelta
 
 import httpx
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from apps.core.domain.lifecycle import mark_done, store_today, store_zone
+from apps.core.domain.lifecycle import (
+    ensure_instances,
+    evaluate_status,
+    mark_done,
+    store_today,
+    store_zone,
+)
 from apps.core.domain.permissions import MarkDenial, check_can_mark
 from apps.core.models import (
     Employee,
@@ -259,4 +266,74 @@ def on_claim(client, account, callback_id: str, instance_id: int) -> None:
 
 def on_status(client, account) -> None:
     """«Что осталось»: tasks of the current shift, or a shift-state stub."""
-    raise NotImplementedError
+    employee = (
+        Employee.objects.filter(account=account, status=EmployeeStatus.ACTIVE)
+        .select_related("store")
+        .first()
+    )
+    if employee is None:
+        client.send_message(user_id=account.max_user_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
+        return
+
+    now = timezone.now()
+    store = employee.store
+    day = store_today(store, now)
+    zone = store_zone(store)
+    tolerance = timedelta(minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES)
+    shifts = list(
+        Shift.objects.filter(
+            employee=employee,
+            store=store,
+            date=day,
+            status=ShiftStatus.PUBLISHED,
+        ).order_by("start_time")
+    )
+
+    def bounds(shift):
+        starts_at = datetime.combine(shift.date, shift.start_time, tzinfo=zone)
+        ends_at = datetime.combine(shift.date, shift.end_time, tzinfo=zone)
+        return starts_at - tolerance, ends_at + tolerance
+
+    current_shift = next(
+        (shift for shift in shifts if bounds(shift)[0] <= now <= bounds(shift)[1]),
+        None,
+    )
+    if current_shift is None:
+        upcoming = [shift for shift in shifts if now < bounds(shift)[0]]
+        if upcoming:
+            response = texts.status_not_started(_time(upcoming[0].start_time))
+        elif shifts:
+            response = texts.status_ended(_time(shifts[-1].end_time))
+        else:
+            response = texts.denial_day_off(_next_shift_label(employee, now))
+        client.send_message(user_id=account.max_user_id, text=response)
+        return
+
+    task_rows = []
+    for instance in ensure_instances(store, day):
+        planned_time = instance.template.planned_time
+        if not current_shift.start_time <= planned_time <= current_shift.end_time:
+            continue
+        claim = getattr(instance, "claim", None)
+        if (
+            instance.template.requires_claim
+            and claim is not None
+            and claim.employee_id != employee.id
+        ):
+            continue
+        task_rows.append(
+            (
+                _time(planned_time),
+                instance.template.title,
+                evaluate_status(instance, now),
+            )
+        )
+
+    client.send_message(
+        user_id=account.max_user_id,
+        text=texts.shift_status(
+            store.name,
+            _time(current_shift.end_time),
+            task_rows,
+        ),
+    )

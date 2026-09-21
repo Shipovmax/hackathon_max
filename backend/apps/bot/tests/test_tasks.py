@@ -7,9 +7,10 @@ from django.test import TestCase
 from django.test.utils import override_settings
 
 from apps.bot import texts
-from apps.bot.handlers.tasks import on_done, on_photo
+from apps.bot.handlers.tasks import on_done, on_photo, on_status
 from apps.core.domain.lifecycle import mark_done
 from apps.core.models import (
+    Claim,
     Employee,
     MaxAccount,
     Network,
@@ -360,4 +361,164 @@ class DoneCallbackTests(TestCase):
         self.assertEqual(
             self.client.sent,
             [{"user_id": other_account.max_user_id, "text": texts.PHOTO_NOT_EXPECTED}],
+        )
+
+
+class StatusHandlerTests(TestCase):
+    def setUp(self):
+        owner = MaxAccount.objects.create(max_user_id=1)
+        network = Network.objects.create(owner=owner, name="Test network")
+        self.store = Store.objects.create(
+            network=network,
+            name="Lenina, 14",
+            open_time=time(9),
+            close_time=time(22),
+            timezone="Europe/Moscow",
+        )
+        self.account = MaxAccount.objects.create(max_user_id=101)
+        self.employee = Employee.objects.create(
+            store=self.store,
+            name="Anna",
+            account=self.account,
+        )
+        self.shift = self.make_shift(time(9), time(17))
+        self.template = TaskTemplate.objects.create(
+            store=self.store,
+            title="Open store",
+            planned_time=time(10),
+            requires_photo=False,
+        )
+        self.instance = TaskInstance.objects.create(template=self.template, date=DAY)
+        self.client = RecordingClient()
+
+    def make_shift(self, start, end, *, day=DAY):
+        return Shift.objects.create(
+            employee=self.employee,
+            store=self.store,
+            date=day,
+            start_time=start,
+            end_time=end,
+            status=ShiftStatus.PUBLISHED,
+        )
+
+    def make_instance(self, title, planned_time, **template_fields):
+        template = TaskTemplate.objects.create(
+            store=self.store,
+            title=title,
+            planned_time=planned_time,
+            **template_fields,
+        )
+        return TaskInstance.objects.create(template=template, date=DAY)
+
+    def call(self, *, account=None, now=NOW):
+        with mock.patch("apps.bot.handlers.tasks.timezone.now", return_value=now):
+            on_status(self.client, account or self.account)
+
+    def test_lists_only_current_shift_tasks_with_computed_status_marks(self):
+        completed = self.make_instance("Cleaning", time(9), requires_photo=False)
+        mark_done(completed, self.employee, datetime(2026, 9, 21, 6, 1, tzinfo=timezone.utc))
+        awaiting = self.make_instance("Photo report", time(9, 30), requires_photo=True)
+        awaiting.status = TaskStatus.AWAITING_PHOTO
+        awaiting.awaiting_photo_employee = self.employee
+        awaiting.awaiting_photo_since = NOW
+        awaiting.save(
+            update_fields=["status", "awaiting_photo_employee", "awaiting_photo_since"]
+        )
+        self.make_instance("Prepare sales floor", time(11), requires_photo=False)
+        self.make_instance("After shift", time(18), requires_photo=False)
+
+        self.call()
+
+        self.assertEqual(
+            self.client.sent,
+            [
+                {
+                    "user_id": self.account.max_user_id,
+                    "text": (
+                        "Задачи смены. Lenina, 14 · до 17:00\n\n"
+                        "✓ 09:00 Cleaning\n"
+                        "… 09:30 Photo report — ожидается фото\n"
+                        "○ 10:00 Open store\n"
+                        "○ 11:00 Prepare sales floor"
+                    ),
+                }
+            ],
+        )
+
+    def test_hides_claim_task_taken_by_another_employee(self):
+        other = Employee.objects.create(store=self.store, name="Igor")
+        claimed = self.make_instance(
+            "Delivery",
+            time(12),
+            requires_photo=False,
+            requires_claim=True,
+        )
+        Claim.objects.create(instance=claimed, employee=other)
+
+        self.call()
+
+        self.assertNotIn("Delivery", self.client.sent[0]["text"])
+        self.assertIn("Open store", self.client.sent[0]["text"])
+
+    def test_reports_future_shift_instead_of_tasks(self):
+        self.shift.start_time = time(14)
+        self.shift.end_time = time(22)
+        self.shift.save(update_fields=["start_time", "end_time"])
+
+        self.call()
+
+        self.assertEqual(
+            self.client.sent[0]["text"],
+            "Ваша смена сегодня с 14:00. Задачи появятся после начала смены.",
+        )
+
+    def test_reports_ended_shift_instead_of_tasks(self):
+        self.shift.start_time = time(8)
+        self.shift.end_time = time(9)
+        self.shift.save(update_fields=["start_time", "end_time"])
+
+        self.call()
+
+        self.assertEqual(
+            self.client.sent[0]["text"],
+            "Ваша смена завершилась в 09:00. Итог придёт отдельным сообщением.",
+        )
+
+    def test_reports_day_off_and_next_shift(self):
+        self.shift.delete()
+        self.make_shift(time(9), time(17), day=DAY + timedelta(days=1))
+
+        self.call()
+
+        self.assertEqual(
+            self.client.sent[0]["text"],
+            "Сегодня у вас выходной. Ближайшая смена — завтра с 09:00",
+        )
+
+    def test_boundary_tolerance_counts_as_current_shift(self):
+        before_start = datetime(2026, 9, 21, 5, 56, tzinfo=timezone.utc)
+
+        self.call(now=before_start)
+
+        self.assertIn("Задачи смены.", self.client.sent[0]["text"])
+
+    def test_active_shift_without_tasks_has_a_clear_message(self):
+        self.template.is_active = False
+        self.template.save(update_fields=["is_active"])
+
+        self.call()
+
+        self.assertEqual(
+            self.client.sent[0]["text"],
+            "Задачи смены. Lenina, 14 · до 17:00\n\nЗадач на эту смену нет.",
+        )
+
+    def test_unbound_account_is_asked_for_invite_code(self):
+        unbound = MaxAccount.objects.create(max_user_id=999)
+
+        self.call(account=unbound)
+
+        self.assertEqual(
+            self.client.sent,
+            [{"user_id": unbound.max_user_id, "text": texts.ROLE_EMPLOYEE_ASK_CODE}],
         )

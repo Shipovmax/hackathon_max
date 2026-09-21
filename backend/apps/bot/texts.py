@@ -83,6 +83,40 @@ def shift_summary(done: int, total: int, not_marked: list[str]) -> str:
     return f"{text}\nНе отмечено: {', '.join(not_marked)}" if not_marked else text
 
 
+def shift_status(store_name: str, until: str, tasks: list[tuple[str, str, str]]) -> str:
+    labels = {
+        "done_on_time": "✓",
+        "done_late": "✓",
+        "awaiting_photo": "…",
+        "overdue": "⚠",
+        "missed": "⚠",
+        "unclaimed": "⚠",
+    }
+    suffixes = {
+        "done_late": " — выполнено с опозданием",
+        "awaiting_photo": " — ожидается фото",
+        "overdue": " — просрочено",
+        "missed": " — не выполнено",
+        "unclaimed": " — никто не взял",
+    }
+    heading = f"Задачи смены. {store_name} · до {until}"
+    if not tasks:
+        return f"{heading}\n\nЗадач на эту смену нет."
+    lines = [
+        f"{labels.get(status, '○')} {at} {title}{suffixes.get(status, '')}"
+        for at, title, status in tasks
+    ]
+    return f"{heading}\n\n" + "\n".join(lines)
+
+
+def status_not_started(shift_start: str) -> str:
+    return f"Ваша смена сегодня с {shift_start}. Задачи появятся после начала смены."
+
+
+def status_ended(shift_end: str) -> str:
+    return f"Ваша смена завершилась в {shift_end}. Итог придёт отдельным сообщением."
+
+
 def denial_day_off(next_shift: str | None) -> str:
     if next_shift:
         return f"Сегодня у вас выходной. Ближайшая смена — {next_shift}"
