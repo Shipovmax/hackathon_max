@@ -19,6 +19,9 @@ const HEALTH: Record<StoreHealth, [string, Tone]> = {
   unclaimed: ['не взята', 'bad'],
 };
 
+export const healthTone = (health: StoreHealth): Tone => HEALTH[health][1];
+export const taskTone = (status: TaskStatus): Tone => TASK[status][1];
+
 function Badge({ label, tone }: { label: string; tone: Tone }) {
   if (!label) return null;
   return <span className={`badge badge--${tone}`}>{label}</span>;
@@ -33,4 +36,19 @@ export function TaskStatusBadge({ status, lateMinutes }: { status: TaskStatus; l
 export function HealthBadge({ health }: { health: StoreHealth }) {
   const [label, tone] = HEALTH[health];
   return <Badge label={label} tone={tone} />;
+}
+
+/** Точка статуса слева от строки: цвет видно раньше, чем прочитан текст. */
+export function StatusDot({ tone }: { tone: Tone }) {
+  return <span className={`dot dot--${tone}`} aria-hidden="true" />;
+}
+
+/** Полоса «сколько задач закрыто» — счётчик читается за один взгляд. */
+export function Progress({ done, total, tone }: { done: number; total: number; tone: Tone }) {
+  const percent = total === 0 ? 0 : Math.round((done / total) * 100);
+  return (
+    <span className="progress" role="img" aria-label={`Выполнено ${done} из ${total}`}>
+      <span className={`progress__fill progress__fill--${tone}`} style={{ width: `${percent}%` }} />
+    </span>
+  );
 }

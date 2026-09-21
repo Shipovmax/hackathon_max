@@ -25,6 +25,13 @@ import {
   weekStart,
 } from '../lib/format';
 
+/** Сегодняшний столбец подсвечен, выходные приглушены — неделя читается сразу. */
+function cellClass(date: string, weekend: boolean): string {
+  return [date === today() && 'schedule__col--today', weekend && 'schedule__col--weekend']
+    .filter(Boolean)
+    .join(' ');
+}
+
 interface EditorState {
   employeeId: number;
   employeeName: string;
@@ -82,7 +89,12 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
   }, [data]);
 
   const days = useMemo(
-    () => WEEKDAYS.map((label, index) => ({ label, date: addDays(data.week_start, index) })),
+    () =>
+      WEEKDAYS.map((label, index) => ({
+        label,
+        date: addDays(data.week_start, index),
+        weekend: index >= 5,
+      })),
     [data.week_start],
   );
 
@@ -184,8 +196,9 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
                 <tr>
                   <th />
                   {days.map((day) => (
-                    <th key={day.date}>
-                      <Typography.Label variant="small">{day.label}</Typography.Label>
+                    <th key={day.date} className={cellClass(day.date, day.weekend)}>
+                      <span className="schedule__day">{day.label}</span>
+                      <span className="schedule__date">{Number(day.date.slice(8))}</span>
                     </th>
                   ))}
                 </tr>
@@ -199,7 +212,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
                     {days.map((day) => {
                       const shift = shifts.find((item) => item.employee_id === employee.id && item.date === day.date);
                       return (
-                        <td key={day.date}>
+                        <td key={day.date} className={cellClass(day.date, day.weekend)}>
                           <button
                             type="button"
                             className={`schedule__cell${shift ? ' schedule__cell--filled' : ''}`}
