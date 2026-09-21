@@ -11,9 +11,11 @@ from apps.bot.scheduler import (
     send_closing_notifications,
     send_reminders,
     send_shift_start_messages,
+    send_shift_summaries,
 )
 from apps.core.domain.lifecycle import mark_done
 from apps.core.models import (
+    Claim,
     Employee,
     EmployeeStatus,
     MaxAccount,
@@ -521,6 +523,148 @@ class ClosingNotificationsTests(TestCase):
         self.instance.refresh_from_db()
         self.assertIsNotNone(self.instance.closing_notified_at)
         self.assertEqual(len(self.client.sent), 1)
+
+
+@override_settings(SHIFT_BOUNDARY_TOLERANCE_MINUTES=5)
+class ShiftSummariesTests(TestCase):
+    def setUp(self):
+        owner = MaxAccount.objects.create(max_user_id=1)
+        network = Network.objects.create(owner=owner, name="Test network")
+        self.store = Store.objects.create(
+            network=network,
+            name="Lenina, 14",
+            open_time=time(9),
+            close_time=time(22),
+            timezone="Europe/Moscow",
+        )
+        self.account = MaxAccount.objects.create(max_user_id=101)
+        self.employee = Employee.objects.create(
+            store=self.store,
+            name="Anna",
+            account=self.account,
+        )
+        self.shift = Shift.objects.create(
+            employee=self.employee,
+            store=self.store,
+            date=date(2026, 9, 21),
+            start_time=time(9),
+            end_time=time(17),
+            status=ShiftStatus.PUBLISHED,
+        )
+        self.client = RecordingClient()
+        self.summary_at = datetime(2026, 9, 21, 14, 5, tzinfo=timezone.utc)
+
+    def make_instance(self, title, planned_time, **template_fields):
+        template = TaskTemplate.objects.create(
+            store=self.store,
+            title=title,
+            planned_time=planned_time,
+            requires_photo=False,
+            **template_fields,
+        )
+        return TaskInstance.objects.create(template=template, date=self.shift.date)
+
+    def test_counts_only_collective_and_own_claimed_tasks_inside_shift(self):
+        completed = self.make_instance("Opening", time(9))
+        other = Employee.objects.create(store=self.store, name="Igor")
+        mark_done(
+            completed,
+            other,
+            datetime(2026, 9, 21, 6, 3, tzinfo=timezone.utc),
+        )
+        self.make_instance("Cleaning", time(11))
+        own_claim = self.make_instance("Delivery", time(14), requires_claim=True)
+        Claim.objects.create(instance=own_claim, employee=self.employee)
+        other_claim = self.make_instance("Inventory", time(15), requires_claim=True)
+        Claim.objects.create(instance=other_claim, employee=other)
+        self.make_instance("Unclaimed cash count", time(16), requires_claim=True)
+        self.make_instance("Closing", time(22))
+
+        send_shift_summaries(self.summary_at, client=self.client)
+
+        self.assertEqual(
+            self.client.sent,
+            [
+                {
+                    "user_id": self.account.max_user_id,
+                    "text": (
+                        "Смена завершена. Выполнено 1 из 3\n"
+                        "Не отмечено: Cleaning, Delivery"
+                    ),
+                }
+            ],
+        )
+        self.shift.refresh_from_db()
+        self.assertEqual(self.shift.summary_sent_at, self.summary_at)
+
+    def test_waits_for_boundary_tolerance_and_sends_only_once(self):
+        self.make_instance("Opening", time(9))
+
+        send_shift_summaries(
+            self.summary_at - timedelta(seconds=1),
+            client=self.client,
+        )
+        self.assertEqual(self.client.sent, [])
+
+        send_shift_summaries(self.summary_at, client=self.client)
+        send_shift_summaries(
+            self.summary_at + timedelta(seconds=30),
+            client=self.client,
+        )
+        self.assertEqual(len(self.client.sent), 1)
+
+    def test_empty_shift_still_receives_a_clear_zero_summary(self):
+        send_shift_summaries(self.summary_at, client=self.client)
+
+        self.assertEqual(
+            self.client.sent,
+            [
+                {
+                    "user_id": self.account.max_user_id,
+                    "text": "Смена завершена. Выполнено 0 из 0",
+                }
+            ],
+        )
+
+    def test_draft_and_unbound_shifts_are_skipped(self):
+        self.shift.status = ShiftStatus.DRAFT
+        self.shift.save(update_fields=["status"])
+        send_shift_summaries(self.summary_at, client=self.client)
+        self.assertEqual(self.client.sent, [])
+
+        self.shift.status = ShiftStatus.PUBLISHED
+        self.shift.save(update_fields=["status"])
+        self.employee.account = None
+        self.employee.save(update_fields=["account"])
+        send_shift_summaries(self.summary_at, client=self.client)
+        self.assertEqual(self.client.sent, [])
+
+    def test_failed_summary_is_available_for_retry(self):
+        self.client.error = RuntimeError("MAX unavailable")
+
+        with self.assertRaisesRegex(RuntimeError, "MAX unavailable"):
+            send_shift_summaries(self.summary_at, client=self.client)
+
+        self.shift.refresh_from_db()
+        self.assertIsNone(self.shift.summary_sent_at)
+        self.client.error = None
+        send_shift_summaries(
+            self.summary_at + timedelta(seconds=30),
+            client=self.client,
+        )
+        self.shift.refresh_from_db()
+        self.assertIsNotNone(self.shift.summary_sent_at)
+        self.assertEqual(len(self.client.sent), 1)
+
+    def test_does_not_send_stale_summary_on_a_later_day(self):
+        send_shift_summaries(
+            datetime(2026, 9, 22, 14, 5, tzinfo=timezone.utc),
+            client=self.client,
+        )
+
+        self.assertEqual(self.client.sent, [])
+        self.shift.refresh_from_db()
+        self.assertIsNone(self.shift.summary_sent_at)
 
 
 @override_settings(REMINDER_MINUTES_BEFORE=5)

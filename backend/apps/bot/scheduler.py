@@ -235,8 +235,66 @@ def escalate_unclaimed(now: datetime) -> None:
     """Claim tasks: repeat the question CLAIM_ESCALATION_MINUTES_BEFORE minutes before, tell the owner at the deadline."""
 
 
-def send_shift_summaries(now: datetime) -> None:
+def send_shift_summaries(now: datetime, client=None) -> None:
     """Shift-end summary «Выполнено N из M» for tasks that belonged to that employee's shift."""
+    sender = client
+    shift_ids = Shift.objects.filter(
+        status=ShiftStatus.PUBLISHED,
+        summary_sent_at__isnull=True,
+        store__is_active=True,
+        employee__status=EmployeeStatus.ACTIVE,
+        employee__account__isnull=False,
+    ).values_list("id", flat=True)
+    boundary_tolerance = timedelta(minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES)
+
+    for shift_id in shift_ids:
+        with transaction.atomic():
+            shift = (
+                Shift.objects.select_for_update()
+                .select_related("store", "employee__account")
+                .filter(
+                    pk=shift_id,
+                    status=ShiftStatus.PUBLISHED,
+                    summary_sent_at__isnull=True,
+                )
+                .first()
+            )
+            if shift is None or shift.date != store_today(shift.store, now):
+                continue
+            ends_at = datetime.combine(
+                shift.date,
+                shift.end_time,
+                tzinfo=store_zone(shift.store),
+            )
+            if now < ends_at + boundary_tolerance:
+                continue
+
+            relevant = []
+            for instance in ensure_instances(shift.store, shift.date):
+                planned_time = instance.template.planned_time
+                if not shift.start_time <= planned_time <= shift.end_time:
+                    continue
+                claim = getattr(instance, "claim", None)
+                if instance.template.requires_claim and (
+                    claim is None or claim.employee_id != shift.employee_id
+                ):
+                    continue
+                relevant.append(instance)
+
+            done = [instance for instance in relevant if getattr(instance, "completion", None)]
+            not_marked = [
+                instance.template.title
+                for instance in relevant
+                if getattr(instance, "completion", None) is None
+            ]
+            if sender is None:
+                sender = MaxClient()
+            sender.send_message(
+                user_id=shift.employee.account.max_user_id,
+                text=texts.shift_summary(len(done), len(relevant), not_marked),
+            )
+            shift.summary_sent_at = now
+            shift.save(update_fields=["summary_sent_at"])
 
 
 def tick(now: datetime) -> None:
