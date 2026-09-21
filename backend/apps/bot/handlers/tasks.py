@@ -119,8 +119,10 @@ def on_done(client, account, callback_id: str, instance_id: int) -> None:
 
     now = timezone.now()
     with transaction.atomic():
+        # PostgreSQL refuses FOR UPDATE over the nullable side of an outer join, and
+        # select_related on completion/claim produces exactly that: lock only the row.
         instance = (
-            TaskInstance.objects.select_for_update()
+            TaskInstance.objects.select_for_update(of=("self",))
             .select_related(
                 "template__store",
                 "completion__employee",
@@ -245,7 +247,7 @@ def on_photo(client, account, message: dict) -> None:
     now = timezone.now()
     with transaction.atomic():
         instance = (
-            TaskInstance.objects.select_for_update()
+            TaskInstance.objects.select_for_update(of=("self",))
             .select_related("template__store", "completion")
             .filter(
                 pk=pending.pk,
@@ -292,7 +294,7 @@ def on_claim(client, account, callback_id: str, instance_id: int) -> None:
     buttons = None
     with transaction.atomic():
         instance = (
-            TaskInstance.objects.select_for_update()
+            TaskInstance.objects.select_for_update(of=("self",))
             .select_related("template__store", "claim__employee")
             .filter(pk=instance_id)
             .first()

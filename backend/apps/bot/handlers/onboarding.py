@@ -36,7 +36,7 @@ def bind_by_code(account: MaxAccount, raw_code: str) -> Employee | None:
     try:
         with transaction.atomic():
             invite = (
-                InviteCode.objects.select_for_update()
+                InviteCode.objects.select_for_update(of=("self",))
                 .select_related("employee__store")
                 .filter(code=code, used_at__isnull=True, employee__status=EmployeeStatus.ACTIVE)
                 .first()

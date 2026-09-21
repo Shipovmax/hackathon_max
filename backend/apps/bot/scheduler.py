@@ -187,7 +187,7 @@ def expire_photo_waits(now: datetime) -> None:
     for instance_id in expired_ids:
         with transaction.atomic():
             instance = (
-                TaskInstance.objects.select_for_update()
+                TaskInstance.objects.select_for_update(of=("self",))
                 .filter(
                     pk=instance_id,
                     status=TaskStatus.AWAITING_PHOTO,
@@ -224,8 +224,10 @@ def mark_overdue(now: datetime, client=None) -> None:
 
     for instance_id in candidate_ids:
         with transaction.atomic():
+            # PostgreSQL refuses FOR UPDATE over the nullable side of an outer join, and
+            # select_related on completion/claim produces exactly that: lock only the row.
             instance = (
-                TaskInstance.objects.select_for_update()
+                TaskInstance.objects.select_for_update(of=("self",))
                 .select_related(
                     "template__store__network__owner",
                     "completion",
@@ -269,7 +271,7 @@ def send_closing_notifications(now: datetime, client=None) -> None:
     for instance_id in candidate_ids:
         with transaction.atomic():
             instance = (
-                TaskInstance.objects.select_for_update()
+                TaskInstance.objects.select_for_update(of=("self",))
                 .select_related(
                     "template__store__network__owner",
                     "completion__employee",
@@ -306,7 +308,7 @@ def escalate_unclaimed(now: datetime, client=None) -> None:
     for instance_id in instance_ids:
         with transaction.atomic():
             instance = (
-                TaskInstance.objects.select_for_update()
+                TaskInstance.objects.select_for_update(of=("self",))
                 .select_related(
                     "template__store__network__owner",
                     "claim",
@@ -375,7 +377,7 @@ def send_shift_summaries(now: datetime, client=None) -> None:
     for shift_id in shift_ids:
         with transaction.atomic():
             shift = (
-                Shift.objects.select_for_update()
+                Shift.objects.select_for_update(of=("self",))
                 .select_related("store", "employee__account")
                 .filter(
                     pk=shift_id,

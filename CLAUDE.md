@@ -400,6 +400,11 @@
   перехватывают события друг у друга. Перед запуском бота убедись, что он не запущен
   у другого участника.
 - Изменил модели: `python manage.py makemigrations core` и добавь файл миграции.
+- Тесты локально идут на SQLite, а прод работает на PostgreSQL, и он строже: часть ошибок
+  на SQLite не видна. Блокирующие запросы пиши как `select_for_update(of=("self",))` —
+  обычный `select_for_update()` вместе с `select_related` по необязательной связи даёт
+  `FOR UPDATE` поверх outer join, и PostgreSQL его отвергает. Тронул запросы — прогони
+  тесты на настоящей базе: `docker compose run --rm --no-deps migrate python manage.py test --noinput`.
 - Перед завершением работы: `python manage.py test` в `backend` и `npm run build` в
   `frontend`.
 

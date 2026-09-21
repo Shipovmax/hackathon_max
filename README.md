@@ -53,7 +53,7 @@ python manage.py seed_demo --owner-max-id <ваш MAX id>
 
 ```powershell
 python manage.py run_bot             # получает события MAX (Long Polling)
-python manage.py run_scheduler       # напоминания, просрочки, эскалации (пока пустой цикл)
+python manage.py run_scheduler       # напоминания, просрочки, эскалации
 ```
 
 С одним токеном `run_bot` должен работать **только у одного человека одновременно**: параллельные Long Polling перехватывают события друг у друга. Бот работает на сервере, поэтому перед локальной отладкой его останавливают (`docker compose stop bot` на сервере) и потом возвращают.
@@ -71,6 +71,16 @@ npm run dev                          # http://localhost:5173
 
 Проверка перед пушем: `python manage.py test` в `backend` и `npm run build` в `frontend`.
 
+**Локально тесты идут на SQLite, а на сервере работает PostgreSQL, и он строже.** Так мы уже
+пропустили поломку: `select_for_update()` вместе с `select_related` по необязательной связи
+даёт `FOR UPDATE` поверх outer join — SQLite это молча пропускает, PostgreSQL отвечает
+`NotSupportedError`. Поэтому блокирующие запросы пишем как `select_for_update(of=("self",))`,
+а перед сдачей и после заметных изменений в запросах прогоняем тесты на настоящей базе:
+
+```bash
+docker compose run --rm --no-deps migrate python manage.py test --noinput
+```
+
 ### Карта кода и статус
 
 | Где | Что делает | Статус |
@@ -84,15 +94,15 @@ npm run dev                          # http://localhost:5173
 | `backend/apps/api/views/`, `urls.py`, `presenters.py`, `scoping.py` | все эндпоинты мини-приложения, проверка владения сетью, валидация | готово, есть тесты |
 | `backend/apps/bot/max_api/client.py` | клиент MAX API: `get_me`, `get_updates`, `send_message`, `answer_callback`, `download_file` | готово |
 | `backend/apps/bot/handlers/onboarding.py` | `/start`, выбор роли, `/role`, привязка сотрудника по коду | готово, есть тесты |
-| `backend/apps/bot/handlers/tasks.py` | «Выполнено», фото, «Беру», «что осталось» | заглушки |
-| `backend/apps/bot/scheduler.py` | 6 задач планировщика, цикл в `run_scheduler` | цикл готов, задачи пустые |
-| `backend/apps/bot/notifications.py` | 3 уведомления владельцу | заглушки |
+| `backend/apps/bot/handlers/tasks.py` | «Выполнено», фото, «Беру», «что осталось» | готово, есть тесты |
+| `backend/apps/bot/scheduler.py` | 9 задач планировщика, цикл в `run_scheduler` | готово, есть тесты |
+| `backend/apps/bot/notifications.py` | 3 уведомления владельцу с диплинком в карточку точки | готово, есть тесты |
 | `backend/apps/bot/texts.py`, `keyboards.py` | формулировки сообщений и кнопки | готово |
 | `frontend/src/screens/` | 5 экранов владельца с редактированием | готово; на демо-данных (`VITE_USE_MOCKS=1`) и с настоящим API |
 | `Dockerfile`, `compose.yaml`, `deploy/` | сборка и запуск | проверено на сервере: сборка около 75 секунд, все сервисы поднимаются, https работает |
 | README: тестовые данные и шаги проверки | нужны для сдачи | заполнить |
 
-Заглушки с `NotImplementedError` в обработчиках бота не роняют его: ошибка пишется в лог, пользователь ничего не получает.
+Бот и планировщик реализованы полностью: заглушек `NotImplementedError` в `apps/bot/` не осталось.
 
 ### Как проверить бота вручную
 
