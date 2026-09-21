@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { apiGet } from './client';
 
@@ -7,16 +7,19 @@ export interface ApiState<T> {
   error: Error | null;
   loading: boolean;
   reload: () => void;
+  /** Локальное обновление после успешной записи, чтобы не перезапрашивать экран. */
+  setData: (data: T) => void;
 }
 
 export function useApi<T>(path: string): ApiState<T> {
-  const [state, setState] = useState<Omit<ApiState<T>, 'reload'>>({
+  const [state, setState] = useState<{ data: T | null; error: Error | null; loading: boolean }>({
     data: null,
     error: null,
     loading: true,
   });
   const [nonce, setNonce] = useState(0);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const setData = useCallback((data: T) => setState({ data, error: null, loading: false }), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,5 +37,45 @@ export function useApi<T>(path: string): ApiState<T> {
     };
   }, [path, nonce]);
 
-  return { ...state, reload };
+  return { ...state, reload, setData };
+}
+
+export interface ActionState {
+  running: boolean;
+  error: Error | null;
+  /** Возвращает undefined, если запрос не прошёл: ошибка уже в state.error. */
+  run: <T>(task: () => Promise<T>) => Promise<T | undefined>;
+  reset: () => void;
+}
+
+/** Запись на сервер: состояние «сохраняю» для кнопки и текст ошибки рядом с формой. */
+export function useAction(): ActionState {
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const run = useCallback(async <T,>(task: () => Promise<T>): Promise<T | undefined> => {
+    setRunning(true);
+    setError(null);
+    try {
+      const result = await task();
+      if (mounted.current) setRunning(false);
+      return result;
+    } catch (failure) {
+      if (mounted.current) {
+        setError(failure as Error);
+        setRunning(false);
+      }
+      return undefined;
+    }
+  }, []);
+
+  return { running, error, run, reset: useCallback(() => setError(null), []) };
 }

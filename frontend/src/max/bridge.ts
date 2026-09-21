@@ -23,18 +23,58 @@ declare global {
 }
 
 export const getInitData = (): string => window.WebApp?.initData ?? '';
+
+/**
+ * Диплинк из уведомления владельцу: https://max.ru/<ник>?startapp=store_3 или
+ * store_3_20260921 — открываем сразу карточку точки за нужный день.
+ */
+export function startRoute(): string | null {
+  const payload = window.WebApp?.initDataUnsafe?.start_param ?? '';
+  const match = /^store_(\d+)(?:_(\d{4})(\d{2})(\d{2}))?$/.exec(payload);
+  if (!match) return null;
+  const [, storeId, year, month, day] = match;
+  return year ? `/stores/${storeId}?date=${year}-${month}-${day}` : `/stores/${storeId}`;
+}
 export const getPlatform = (): WebAppPlatform => window.WebApp?.platform ?? 'web';
 export const isInsideMax = (): boolean => Boolean(window.WebApp?.initData);
 
+// Обработчики «Назад» складываются в стопку: сработает верхний. Так открытая форма
+// закрывается по «Назад», а не уводит пользователя с экрана.
+const handlers: (() => void)[] = [];
+const dispatch = () => handlers[handlers.length - 1]?.();
+let attached = false;
+
+function sync(): void {
+  const button = window.WebApp?.BackButton;
+  if (!button) return;
+  if (handlers.length > 0) {
+    if (!attached) {
+      button.onClick(dispatch);
+      attached = true;
+    }
+    button.show();
+  } else {
+    button.hide();
+  }
+}
+
 export function useBackButton(onBack: (() => void) | null): void {
   useEffect(() => {
-    const button = window.WebApp?.BackButton;
-    if (!button || !onBack) return;
-    button.show();
-    button.onClick(onBack);
+    if (!onBack) return;
+    handlers.push(onBack);
+    sync();
     return () => {
-      button.offClick(onBack);
-      button.hide();
+      const index = handlers.lastIndexOf(onBack);
+      if (index >= 0) handlers.splice(index, 1);
+      sync();
     };
   }, [onBack]);
+}
+
+/** Тема MAX меняется на ходу, приложение должно перекрашиваться вместе с ней. */
+export function watchColorScheme(onChange: (scheme: 'light' | 'dark') => void): () => void {
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const listener = () => onChange(media.matches ? 'dark' : 'light');
+  media.addEventListener('change', listener);
+  return () => media.removeEventListener('change', listener);
 }

@@ -1,52 +1,133 @@
-import { CellList, CellSimple } from '@maxhub/max-ui';
-import { useNavigate, useParams } from 'react-router-dom';
+import { CellList, CellSimple, Typography } from '@maxhub/max-ui';
+import { Fragment, useCallback, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { useApi } from '../api/hooks';
-import type { StoreDay as StoreDayData } from '../api/types';
+import type { DayTask, StoreDay as StoreDayData } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
+import { Empty } from '../components/Empty';
+import { DateNav } from '../components/DateNav';
+import { PhotoView } from '../components/PhotoView';
 import { Screen } from '../components/Screen';
-import { TaskStatusBadge } from '../components/StatusBadge';
-import { formatRange } from '../lib/format';
+import { StatusDot, TaskStatusBadge, taskTone } from '../components/StatusBadge';
+import { formatRange, minutesOf, today } from '../lib/format';
+
+// Плановое время стоит слева, поэтому в подписи только то, что произошло.
+function subtitle(task: DayTask): string {
+  if (task.done_by && task.done_at) {
+    const late = task.late_minutes ? `, с опозданием на ${task.late_minutes} мин` : '';
+    return `Отметил ${task.done_by} в ${task.done_at}${late}`;
+  }
+  if (task.claimed_by) return `Принимает ${task.claimed_by}`;
+  if (task.status === 'unclaimed') return 'Задачу никто не взял';
+  if (task.status === 'awaiting_photo') return 'Ждём фото от сотрудника';
+  if (task.status === 'overdue' || task.status === 'missed') return 'Срок прошёл, отметки нет';
+  return 'Ожидается';
+}
 
 export function StoreDay() {
   const { storeId } = useParams();
   const navigate = useNavigate();
-  const state = useApi<StoreDayData>(`/stores/${storeId}/day/`);
+  // Дата живёт в адресе: диплинк из уведомления открывает нужный день сразу.
+  const [params, setParams] = useSearchParams();
+  const date = params.get('date') ?? today();
+  const setDate = useCallback(
+    (next: string) => setParams(next === today() ? {} : { date: next }, { replace: true }),
+    [setParams],
+  );
+  const [photo, setPhoto] = useState<DayTask | null>(null);
+  const state = useApi<StoreDayData>(`/stores/${storeId}/day/?date=${date}`);
+
+  // Черта «сейчас» показывает, что уже должно было произойти, а что впереди.
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
 
   return (
     <AsyncView state={state}>
-      {(data) => (
+      {(data) => {
+        const upcoming = data.tasks.findIndex((task) => minutesOf(task.planned_time) > nowMinutes);
+        // Все задачи дня позади — черта уходит под список.
+        const nowIndex = date !== today() ? -1 : upcoming === -1 ? data.tasks.length : upcoming;
+        return (
         <Screen
           title={data.store.name}
           subtitle={
             data.on_shift.length
               ? `На смене: ${data.on_shift.map((s) => `${s.name} ${formatRange(s.start, s.end)}`).join(', ')}`
-              : 'Сегодня никого на смене'
+              : 'Никого на смене'
           }
           back
+          backTo="/"
         >
-          <CellList mode="island">
-            {data.tasks.map((task) => (
-              <CellSimple
-                key={task.id}
-                title={task.title}
-                subtitle={
-                  task.done_by
-                    ? `${task.done_by}, ${task.done_at}`
-                    : task.claimed_by
-                      ? `${task.planned_time} · берёт ${task.claimed_by}`
-                      : task.planned_time
-                }
-                after={<TaskStatusBadge status={task.status} lateMinutes={task.late_minutes} />}
+          <div className="screen__block">
+            <DateNav date={date} onChange={setDate} />
+          </div>
+
+          <div className="screen__block" aria-live="polite">
+            {state.loading && (
+              <Typography.Label variant="small" className="muted">
+                Обновляем…
+              </Typography.Label>
+            )}
+          </div>
+
+          {data.tasks.length === 0 ? (
+            <div className="screen__block">
+              <Empty
+                icon="clock"
+                title="Задач на этот день нет"
+                text="Задачи точки задаются шаблонами: ежедневные повторяются, разовая ставится на дату."
+                action={{ label: 'Задачи точки', onClick: () => navigate(`/stores/${data.store.id}/tasks`) }}
               />
-            ))}
-          </CellList>
+            </div>
+          ) : (
+            <CellList mode="island" className="timeline__list">
+              {data.tasks.map((task, index) => (
+                <Fragment key={task.id}>
+                  {nowIndex === index && <NowMarker />}
+                  <CellSimple
+                    title={task.title}
+                    subtitle={subtitle(task)}
+                    after={<TaskStatusBadge status={task.status} lateMinutes={task.late_minutes} />}
+                    before={
+                      <span className="timeline">
+                        <span className="timeline__time">{task.planned_time}</span>
+                        <StatusDot tone={taskTone(task.status)} />
+                      </span>
+                    }
+                    showChevron={Boolean(task.photo_url)}
+                    onClick={task.photo_url ? () => setPhoto(task) : undefined}
+                  />
+                </Fragment>
+              ))}
+              {nowIndex === data.tasks.length && <NowMarker />}
+            </CellList>
+          )}
+
           <CellList mode="island">
             <CellSimple title="График смен" showChevron onClick={() => navigate(`/stores/${data.store.id}/schedule`)} />
             <CellSimple title="Задачи точки" showChevron onClick={() => navigate(`/stores/${data.store.id}/tasks`)} />
           </CellList>
+
+          <PhotoView
+            url={photo?.photo_url ?? null}
+            title={photo ? `${photo.title} · ${photo.done_by ?? ''} ${photo.done_at ?? ''}`.trim() : ''}
+            onClose={() => setPhoto(null)}
+          />
         </Screen>
-      )}
+        );
+      }}
     </AsyncView>
+  );
+}
+
+function NowMarker() {
+  const now = new Date();
+  const label = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  return (
+    <div className="nowline">
+      <span className="nowline__time">{label}</span>
+      <span className="nowline__rule" />
+      <span className="nowline__label">сейчас</span>
+    </div>
   );
 }
