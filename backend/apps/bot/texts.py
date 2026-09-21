@@ -49,8 +49,12 @@ def ask_photo(prompt: str = "") -> str:
 
 
 def marked(task_title: str, at: str, next_at: str | None = None) -> str:
-    text = f"{task_title}: отмечено в {at}"
+    text = f"{task_title} отмечено в {at}"
     return f"{text}. Следующая задача — в {next_at}" if next_at else text
+
+
+def awaiting_photo_by(task_title: str, employee_name: str) -> str:
+    return f"Задача «{task_title}» уже ожидает фото от {employee_name}."
 
 
 def claim_question(at: str, task_title: str) -> str:
@@ -74,8 +78,10 @@ def shift_summary(done: int, total: int, not_marked: list[str]) -> str:
     return f"{text}\nНе отмечено: {', '.join(not_marked)}" if not_marked else text
 
 
-def denial_day_off(next_shift: str) -> str:
-    return f"Сегодня у вас выходной. Ближайшая смена — {next_shift}"
+def denial_day_off(next_shift: str | None) -> str:
+    if next_shift:
+        return f"Сегодня у вас выходной. Ближайшая смена — {next_shift}"
+    return "Сегодня у вас выходной. Ближайшая смена ещё не опубликована."
 
 
 def denial_not_started(shift_start: str, task_title: str, who_starts: str) -> str:
