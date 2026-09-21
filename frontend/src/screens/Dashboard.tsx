@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { useApi } from '../api/hooks';
 import type { Dashboard as DashboardData } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
+import { Empty } from '../components/Empty';
+import { Icon } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import { healthTone, HealthBadge, Progress, StatusDot } from '../components/StatusBadge';
 import { formatDate, plural } from '../lib/format';
@@ -31,52 +33,62 @@ export function Dashboard() {
                 loading={state.loading}
                 onClick={state.reload}
               >
-                ↻
+                <Icon name="refresh" />
               </IconButton>
             }
           >
-            <div className="screen__block">
-              <div className={`summary summary--${problems.length === 0 ? 'ok' : 'bad'}`}>
-                <Typography.Title variant="small-strong">
-                  {data.stores.length === 0
-                    ? 'Точек пока нет'
-                    : problems.length === 0
+            {data.stores.length > 0 && (
+              <div className="screen__block">
+                <div className={`summary summary--${problems.length === 0 ? 'ok' : 'bad'}`}>
+                  <Typography.Title variant="small-strong">
+                    {problems.length === 0
                       ? 'Все точки без замечаний'
                       : `${problems.length} ${plural(problems.length, ['точка требует', 'точки требуют', 'точек требуют'])} внимания`}
-                </Typography.Title>
-                <Typography.Body variant="small">
-                  {total > 0
-                    ? `Выполнено ${done} из ${total} ${plural(total, ['задачи', 'задач', 'задач'])} за день`
-                    : 'Добавьте точку и задачи, чтобы бот начал вести смену'}
-                </Typography.Body>
-                <Progress done={done} total={total} tone={problems.length === 0 ? 'ok' : 'warn'} />
+                  </Typography.Title>
+                  <Typography.Body variant="small">
+                    {total > 0
+                      ? `Выполнено ${done} из ${total} ${plural(total, ['задачи', 'задач', 'задач'])} за день`
+                      : 'Задач на сегодня нет'}
+                  </Typography.Body>
+                  <Progress done={done} total={total} tone={problems.length === 0 ? 'ok' : 'warn'} />
+                </div>
               </div>
-            </div>
+            )}
 
-            <CellList mode="island">
-              {data.stores.length === 0 && (
-                <CellSimple title="Добавьте первую точку" subtitle="Экран «Точки и сотрудники»" />
-              )}
-              {data.stores.map((store) => (
-                <CellSimple
-                  key={store.id}
-                  before={<StatusDot tone={healthTone(store.health)} />}
-                  title={store.name}
-                  subtitle={
-                    <span className="storerow">
-                      <span className="storerow__text">
-                        {store.done} из {store.total}
-                        {store.last_event_label ? ` · ${store.last_event_label}` : ''}
-                      </span>
-                      <Progress done={store.done} total={store.total} tone={healthTone(store.health)} />
-                    </span>
-                  }
-                  after={<HealthBadge health={store.health} />}
-                  showChevron
-                  onClick={() => navigate(`/stores/${store.id}`)}
+            {data.stores.length === 0 && (
+              <div className="screen__block">
+                <Empty
+                  icon="store"
+                  title="Точек пока нет"
+                  text="Добавьте магазин, сотрудников и задачи — бот начнёт вести смену со следующего дня."
+                  action={{ label: 'Добавить точку', onClick: () => navigate('/people') }}
                 />
-              ))}
-            </CellList>
+              </div>
+            )}
+
+            {data.stores.length > 0 && (
+              <CellList mode="island">
+                {data.stores.map((store) => (
+                  <CellSimple
+                    key={store.id}
+                    before={<StatusDot tone={healthTone(store.health)} />}
+                    title={store.name}
+                    subtitle={
+                      <span className="storerow">
+                        <span className="storerow__text">
+                          {store.done} из {store.total}
+                          {store.last_event_label ? ` · ${store.last_event_label}` : ''}
+                        </span>
+                        <Progress done={store.done} total={store.total} tone={healthTone(store.health)} />
+                      </span>
+                    }
+                    after={<HealthBadge health={store.health} />}
+                    showChevron
+                    onClick={() => navigate(`/stores/${store.id}`)}
+                  />
+                ))}
+              </CellList>
+            )}
 
             <CellList mode="island">
               <CellSimple title="Точки и сотрудники" showChevron onClick={() => navigate('/people')} />

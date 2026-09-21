@@ -6,6 +6,7 @@ import { apiDelete, apiPatch, apiPost } from '../api/client';
 import { useAction, useApi } from '../api/hooks';
 import type { TaskTemplateInput, TaskTemplateItem } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
+import { Empty } from '../components/Empty';
 import { ErrorNote } from '../components/ErrorNote';
 import { SwitchField, TextField } from '../components/Field';
 import { Screen } from '../components/Screen';
@@ -42,8 +43,19 @@ export function StoreTasks() {
     <AsyncView state={state}>
       {() => (
         <Screen title="Задачи точки" subtitle="Из них бот составляет список дня" back>
+          {daily.length === 0 && once.length === 0 && (
+            <div className="screen__block">
+              <Empty
+                icon="clock"
+                title="Задач ещё нет"
+                text="Начните с открытия, подготовки зала и закрытия смены — бот будет напоминать о них каждый день."
+                action={{ label: 'Добавить задачу', onClick: () => setEditing(blank('daily')) }}
+              />
+            </div>
+          )}
+
+          {daily.length > 0 && (
           <CellList mode="island" header={<CellHeader>Каждый день</CellHeader>}>
-            {daily.length === 0 && <CellSimple title="Ежедневных задач нет" />}
             {daily.map((task) => (
               <CellSimple
                 key={task.id}
@@ -54,9 +66,10 @@ export function StoreTasks() {
               />
             ))}
           </CellList>
+          )}
 
+          {once.length > 0 && (
           <CellList mode="island" header={<CellHeader>Разовые задачи</CellHeader>}>
-            {once.length === 0 && <CellSimple title="Разовых задач нет" />}
             {once.map((task) => (
               <CellSimple
                 key={task.id}
@@ -67,6 +80,7 @@ export function StoreTasks() {
               />
             ))}
           </CellList>
+          )}
 
           <div className="screen__block">
             <Button stretched onClick={() => setEditing(blank('daily'))}>

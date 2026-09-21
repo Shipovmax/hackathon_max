@@ -1,15 +1,16 @@
 import { CellList, CellSimple, Typography } from '@maxhub/max-ui';
-import { useCallback, useState } from 'react';
+import { Fragment, useCallback, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { useApi } from '../api/hooks';
 import type { DayTask, StoreDay as StoreDayData } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
+import { Empty } from '../components/Empty';
 import { DateNav } from '../components/DateNav';
 import { PhotoView } from '../components/PhotoView';
 import { Screen } from '../components/Screen';
 import { StatusDot, TaskStatusBadge, taskTone } from '../components/StatusBadge';
-import { formatRange, today } from '../lib/format';
+import { formatRange, minutesOf, today } from '../lib/format';
 
 // Плановое время стоит слева, поэтому в подписи только то, что произошло.
 function subtitle(task: DayTask): string {
@@ -37,9 +38,16 @@ export function StoreDay() {
   const [photo, setPhoto] = useState<DayTask | null>(null);
   const state = useApi<StoreDayData>(`/stores/${storeId}/day/?date=${date}`);
 
+  // Черта «сейчас» показывает, что уже должно было произойти, а что впереди.
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+
   return (
     <AsyncView state={state}>
-      {(data) => (
+      {(data) => {
+        const upcoming = data.tasks.findIndex((task) => minutesOf(task.planned_time) > nowMinutes);
+        // Все задачи дня позади — черта уходит под список.
+        const nowIndex = date !== today() ? -1 : upcoming === -1 ? data.tasks.length : upcoming;
+        return (
         <Screen
           title={data.store.name}
           subtitle={
@@ -61,25 +69,38 @@ export function StoreDay() {
             )}
           </div>
 
-          <CellList mode="island" className="timeline__list">
-            {data.tasks.length === 0 && <CellSimple title="Задач на этот день нет" />}
-            {data.tasks.map((task) => (
-              <CellSimple
-                key={task.id}
-                title={task.title}
-                subtitle={subtitle(task)}
-                after={<TaskStatusBadge status={task.status} lateMinutes={task.late_minutes} />}
-                before={
-                  <span className="timeline">
-                    <span className="timeline__time">{task.planned_time}</span>
-                    <StatusDot tone={taskTone(task.status)} />
-                  </span>
-                }
-                showChevron={Boolean(task.photo_url)}
-                onClick={task.photo_url ? () => setPhoto(task) : undefined}
+          {data.tasks.length === 0 ? (
+            <div className="screen__block">
+              <Empty
+                icon="clock"
+                title="Задач на этот день нет"
+                text="Задачи точки задаются шаблонами: ежедневные повторяются, разовая ставится на дату."
+                action={{ label: 'Задачи точки', onClick: () => navigate(`/stores/${data.store.id}/tasks`) }}
               />
-            ))}
-          </CellList>
+            </div>
+          ) : (
+            <CellList mode="island" className="timeline__list">
+              {data.tasks.map((task, index) => (
+                <Fragment key={task.id}>
+                  {nowIndex === index && <NowMarker />}
+                  <CellSimple
+                    title={task.title}
+                    subtitle={subtitle(task)}
+                    after={<TaskStatusBadge status={task.status} lateMinutes={task.late_minutes} />}
+                    before={
+                      <span className="timeline">
+                        <span className="timeline__time">{task.planned_time}</span>
+                        <StatusDot tone={taskTone(task.status)} />
+                      </span>
+                    }
+                    showChevron={Boolean(task.photo_url)}
+                    onClick={task.photo_url ? () => setPhoto(task) : undefined}
+                  />
+                </Fragment>
+              ))}
+              {nowIndex === data.tasks.length && <NowMarker />}
+            </CellList>
+          )}
 
           <CellList mode="island">
             <CellSimple title="График смен" showChevron onClick={() => navigate(`/stores/${data.store.id}/schedule`)} />
@@ -92,7 +113,20 @@ export function StoreDay() {
             onClose={() => setPhoto(null)}
           />
         </Screen>
-      )}
+        );
+      }}
     </AsyncView>
+  );
+}
+
+function NowMarker() {
+  const now = new Date();
+  const label = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  return (
+    <div className="nowline">
+      <span className="nowline__time">{label}</span>
+      <span className="nowline__rule" />
+      <span className="nowline__label">сейчас</span>
+    </div>
   );
 }

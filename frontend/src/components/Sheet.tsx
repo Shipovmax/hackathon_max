@@ -3,6 +3,7 @@ import { type ReactNode, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useBackButton } from '../max/bridge';
+import { Icon } from './Icon';
 
 interface SheetProps {
   title: string;
@@ -37,7 +38,7 @@ export function Sheet({ title, open, onClose, children }: SheetProps) {
         <div className="sheet__header">
           <Typography.Title variant="small-strong">{title}</Typography.Title>
           <IconButton size="small" variant="ghost" onClick={close} aria-label="Закрыть">
-            ✕
+            <Icon name="close" />
           </IconButton>
         </div>
         <div className="sheet__body">{children}</div>
