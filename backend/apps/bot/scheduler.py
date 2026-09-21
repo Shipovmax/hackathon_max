@@ -23,7 +23,7 @@ from apps.core.models import (
 )
 
 from . import board, keyboards, notifications, texts
-from .max_api.client import MaxClient
+from .max_api.client import MaxClient, message_id_of
 
 
 def generate_task_instances(now: datetime) -> None:
@@ -106,6 +106,13 @@ def _claim_shifts(instance):
     )
 
 
+def _remember_claim_prompt(instance, response) -> None:
+    """Копим id сообщений с кнопкой «Беру»: по ним потом уберём кнопку."""
+    message_id = message_id_of(response)
+    if message_id:
+        instance.claim_prompt_mids = [*instance.claim_prompt_mids, message_id]
+
+
 def send_claim_requests(now: datetime, client=None) -> None:
     """Ask the responsible shift who will take each claim task."""
     sender = client
@@ -136,7 +143,7 @@ def send_claim_requests(now: datetime, client=None) -> None:
             if user_id in sent_to:
                 continue
             sent_to.add(user_id)
-            sender.send_message(
+            response = sender.send_message(
                 user_id=user_id,
                 text=texts.claim_question(
                     instance.template.planned_time.strftime("%H:%M"),
@@ -144,9 +151,10 @@ def send_claim_requests(now: datetime, client=None) -> None:
                 ),
                 buttons=keyboards.claim_button(instance.id),
             )
+            _remember_claim_prompt(instance, response)
         instance.reminder_sent_at = now
         instance.status = TaskStatus.REMINDED
-        instance.save(update_fields=["reminder_sent_at", "status"])
+        instance.save(update_fields=["reminder_sent_at", "status", "claim_prompt_mids"])
 
 
 def send_reminders(now: datetime, client=None) -> None:
@@ -382,6 +390,11 @@ def escalate_unclaimed(now: datetime, client=None) -> None:
                 continue
             if now < planned - escalation_delta or instance.escalation_sent_at is not None:
                 continue
+            # Повтор имеет смысл, только если первый вопрос ушёл до открытия этого окна.
+            # Задачу могли создать за пару минут до срока — тогда «ещё никто не взял»
+            # прилетело бы сразу следом за «Кто принимает?».
+            if instance.reminder_sent_at is None or instance.reminder_sent_at >= planned - escalation_delta:
+                continue
             shifts = _claim_shifts(instance)
             if not shifts:
                 continue
@@ -393,7 +406,7 @@ def escalate_unclaimed(now: datetime, client=None) -> None:
                 if user_id in sent_to:
                     continue
                 sent_to.add(user_id)
-                sender.send_message(
+                response = sender.send_message(
                     user_id=user_id,
                     text=texts.claim_escalation(
                         instance.template.title,
@@ -402,8 +415,9 @@ def escalate_unclaimed(now: datetime, client=None) -> None:
                     ),
                     buttons=keyboards.claim_button(instance.id),
                 )
+                _remember_claim_prompt(instance, response)
             instance.escalation_sent_at = now
-            instance.save(update_fields=["escalation_sent_at"])
+            instance.save(update_fields=["escalation_sent_at", "claim_prompt_mids"])
 
 
 def send_shift_summaries(now: datetime, client=None) -> None:

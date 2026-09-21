@@ -136,12 +136,20 @@ class GenerateTaskInstancesTests(TestCase):
 class RecordingClient:
     def __init__(self):
         self.sent = []
+        self.edited = []
         self.error = None
+        self.next_mid = 0
 
     def send_message(self, **kwargs):
         if self.error:
             raise self.error
         self.sent.append(kwargs)
+        self.next_mid += 1
+        return {"message": {"body": {"mid": f"mid-{self.next_mid}"}}}
+
+    def edit_message(self, message_id, *, text, buttons=None):
+        self.edited.append((message_id, text, buttons))
+        return {"success": True}
 
 
 class SendShiftStartMessagesTests(TestCase):
@@ -209,9 +217,9 @@ class SendShiftStartMessagesTests(TestCase):
         self.assertEqual(
             [row[0]["text"] for row in message["buttons"]],
             [
-                "Выполнено · 09:00 Open store",
-                "Выполнено · 10:00 Prepare sales floor",
-                "Выполнено · 14:00 Delivery",
+                "Выполнить · 09:00 Open store",
+                "Выполнить · 10:00 Prepare sales floor",
+                "Выполнить · 14:00 Delivery",
             ],
         )
         self.shift.refresh_from_db()
@@ -881,6 +889,9 @@ class ClaimSchedulerTests(TestCase):
 
     def test_escalates_to_shift_fifteen_minutes_before_deadline_once(self):
         escalation_at = self.planned - timedelta(minutes=15)
+        # Вопрос «Кто принимает?» ушёл в начале смены, задолго до повтора.
+        send_claim_requests(self.shift_start, client=self.client)
+        self.client.sent.clear()
 
         escalate_unclaimed(escalation_at, client=self.client)
         escalate_unclaimed(escalation_at + timedelta(seconds=30), client=self.client)
@@ -897,6 +908,24 @@ class ClaimSchedulerTests(TestCase):
             )
         self.instance.refresh_from_db()
         self.assertEqual(self.instance.escalation_sent_at, escalation_at)
+
+    def test_task_created_just_before_the_deadline_is_not_escalated(self):
+        """
+        Владелец завёл задачу за пару минут до срока.
+
+        «Кто принимает?» и «ещё никто не взял» ушли бы одним тиком, секунда в секунду:
+        повтор в этом случае бессмысленный, поэтому его не шлём.
+        """
+        asked_at = self.planned - timedelta(minutes=2)
+        send_claim_requests(asked_at, client=self.client)
+        self.assertEqual(len(self.client.sent), 2)
+        self.client.sent.clear()
+
+        escalate_unclaimed(asked_at + timedelta(seconds=30), client=self.client)
+
+        self.assertEqual(self.client.sent, [])
+        self.instance.refresh_from_db()
+        self.assertIsNone(self.instance.escalation_sent_at)
 
     def test_notifies_owner_at_deadline_and_marks_task_unclaimed_once(self):
         escalate_unclaimed(self.planned, client=self.client)

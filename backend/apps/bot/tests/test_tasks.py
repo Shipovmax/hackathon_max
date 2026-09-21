@@ -8,6 +8,7 @@ from django.test.utils import override_settings
 
 from apps.bot import texts
 from apps.bot.handlers.tasks import on_claim, on_done, on_photo, on_status
+from apps.bot.max_api.client import MaxApiError
 from apps.core.domain.lifecycle import mark_done
 from apps.core.models import (
     Claim,
@@ -32,6 +33,8 @@ class RecordingClient:
         self.answers = []
         self.answer_buttons = []
         self.sent = []
+        self.edited = []
+        self.edit_error = None
         self.downloaded_urls = []
         self.download_result = b"test-image-bytes"
         self.download_error = None
@@ -42,6 +45,13 @@ class RecordingClient:
 
     def send_message(self, **kwargs):
         self.sent.append(kwargs)
+        return {"message": {"body": {"mid": f"mid-{len(self.sent)}"}}}
+
+    def edit_message(self, message_id, *, text, buttons=None):
+        if self.edit_error:
+            raise self.edit_error
+        self.edited.append((message_id, text, buttons))
+        return {"success": True}
 
     def download_file(self, url):
         self.downloaded_urls.append(url)
@@ -624,6 +634,51 @@ class ClaimHandlerTests(TestCase):
     def claim(self, account, callback_id="claim-callback"):
         with mock.patch("apps.bot.handlers.tasks.timezone.now", return_value=NOW):
             on_claim(self.client, account, callback_id, self.instance.id)
+
+    def test_claiming_removes_the_button_from_the_questions_already_sent(self):
+        """
+        Вопрос «Кто принимает?» и повтор за 15 минут остаются в переписке с живой кнопкой.
+
+        Как только задачу взяли, бот правит эти сообщения: текст говорит, кто её делает,
+        клавиатура снимается, нажать «Беру» задним числом уже нельзя.
+        """
+        self.instance.claim_prompt_mids = ["mid-anna", "mid-igor"]
+        self.instance.save(update_fields=["claim_prompt_mids"])
+
+        self.claim(self.anna_account)
+
+        self.assertEqual(
+            self.client.edited,
+            [
+                ("mid-anna", "Delivery в 14:00 выполняет Anna.", None),
+                ("mid-igor", "Delivery в 14:00 выполняет Anna.", None),
+            ],
+        )
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.claim_prompt_mids, [])
+
+    def test_failed_edit_does_not_break_claiming(self):
+        """Сообщение могли удалить вручную — задача всё равно должна закрепиться."""
+        self.instance.claim_prompt_mids = ["gone"]
+        self.instance.save(update_fields=["claim_prompt_mids"])
+        self.client.edit_error = MaxApiError(404, "message not found")
+
+        self.claim(self.anna_account)
+
+        self.assertTrue(Claim.objects.filter(instance=self.instance, employee=self.anna).exists())
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.claim_prompt_mids, [])
+
+    def test_refused_claim_leaves_the_questions_alone(self):
+        Claim.objects.create(instance=self.instance, employee=self.igor)
+        self.instance.claim_prompt_mids = ["mid-anna"]
+        self.instance.save(update_fields=["claim_prompt_mids"])
+
+        self.claim(self.anna_account)
+
+        self.assertEqual(self.client.edited, [])
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.claim_prompt_mids, ["mid-anna"])
 
     def test_first_employee_claims_task_and_others_are_told(self):
         self.claim(self.anna_account)

@@ -18,6 +18,11 @@ def build_ssl_context() -> ssl.SSLContext:
     return context
 
 
+def message_id_of(response: dict) -> str | None:
+    """Идентификатор отправленного сообщения: он нужен, чтобы потом его поправить."""
+    return ((response or {}).get("message") or {}).get("body", {}).get("mid")
+
+
 class MaxClient:
     """Thin wrapper over https://platform-api2.max.ru. Limits: 30 rps overall, 2 messages/sec per dialog."""
 
@@ -63,6 +68,24 @@ class MaxClient:
             body["format"] = format
         params = {"user_id": user_id} if user_id is not None else {"chat_id": chat_id}
         return self._request("POST", "/messages", params=params, json=body)
+
+    def edit_message(
+        self,
+        message_id: str,
+        *,
+        text: str,
+        buttons: list[list[dict]] | None = None,
+    ) -> dict:
+        # Правка уже отправленного сообщения. Пустой список вложений убирает клавиатуру.
+        attachments = []
+        if buttons:
+            attachments = [{"type": "inline_keyboard", "payload": {"buttons": buttons}}]
+        return self._request(
+            "PUT",
+            "/messages",
+            params={"message_id": message_id},
+            json={"text": text, "attachments": attachments},
+        )
 
     def answer_callback(
         self,

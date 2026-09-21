@@ -69,6 +69,9 @@ class TaskInstance(models.Model):
         Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
     awaiting_photo_since = models.DateTimeField(null=True, blank=True)
+    # Идентификаторы сообщений «Кто принимает?» у каждого из смены. Когда задачу берут,
+    # бот правит эти сообщения и убирает кнопку «Беру», чтобы её нельзя было нажать зря.
+    claim_prompt_mids = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["date", "template__planned_time"]

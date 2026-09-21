@@ -20,7 +20,7 @@ def role_choice() -> list[list[dict]]:
 
 
 def done_button(instance_id: int) -> list[list[dict]]:
-    return [[callback_button("Выполнено", f"done:{instance_id}")]]
+    return [[callback_button("Выполнить", f"done:{instance_id}")]]
 
 
 def claim_button(instance_id: int) -> list[list[dict]]:
@@ -50,7 +50,7 @@ def task_buttons(rows: list[tuple[int, str, str, bool]]) -> list[list[dict]]:
         if needs_claim:
             buttons.append([callback_button(f"Беру · {at} {_short(title)}", f"claim:{instance_id}")])
         else:
-            buttons.append([callback_button(f"Выполнено · {at} {_short(title)}", f"done:{instance_id}")])
+            buttons.append([callback_button(f"Выполнить · {at} {_short(title)}", f"done:{instance_id}")])
     return buttons
 
 

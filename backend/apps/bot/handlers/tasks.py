@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -19,6 +20,9 @@ from apps.core.models import (
 )
 
 from .. import board, texts
+from ..max_api.client import MaxApiError
+
+log = logging.getLogger(__name__)
 
 
 def _time(value) -> str:
@@ -129,6 +133,28 @@ def _tell_the_rest(client, employee: Employee, instance: TaskInstance, now, head
         heading,
         skip_employee_id=employee.id,
     )
+
+
+def _close_claim_prompts(client, instance: TaskInstance, employee: Employee) -> None:
+    """
+    Убирает кнопку «Беру» из уже отправленных вопросов: задачу забрали.
+
+    Вызывается до ответа на нажатие. Ответ заменяет сообщение с кнопкой, и если бы правка
+    шла после, она затёрла бы только что показанный список задач.
+    """
+    if not instance.claim_prompt_mids:
+        return
+    text = texts.claim_taken_by(
+        instance.template.title, _time(instance.template.planned_time), employee.name
+    )
+    for message_id in instance.claim_prompt_mids:
+        try:
+            client.edit_message(message_id, text=text)
+        except (MaxApiError, httpx.HTTPError) as error:
+            # Сообщение могли удалить вручную. Это не повод ронять взятие задачи.
+            log.warning("не удалось убрать кнопку «Беру» из %s: %s", message_id, error)
+    instance.claim_prompt_mids = []
+    instance.save(update_fields=["claim_prompt_mids"])
 
 
 @dataclass
@@ -382,6 +408,8 @@ def on_claim(client, account, callback_id: str, instance_id: int) -> None:
                     )
                     taken = True
 
+    if taken:
+        _close_claim_prompts(client, instance, employee)
     _answer_with_board(client, callback_id, employee, now, response)
     if taken:
         _tell_the_rest(
