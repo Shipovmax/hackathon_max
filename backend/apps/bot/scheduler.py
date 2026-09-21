@@ -3,7 +3,13 @@ from datetime import datetime, timedelta
 from django.conf import settings
 from django.db import transaction
 
-from apps.core.domain.lifecycle import ensure_instances, planned_at, store_today, store_zone
+from apps.core.domain.lifecycle import (
+    ensure_instances,
+    evaluate_status,
+    planned_at,
+    store_today,
+    store_zone,
+)
 from apps.core.models import (
     EmployeeStatus,
     Shift,
@@ -13,7 +19,7 @@ from apps.core.models import (
     TaskStatus,
 )
 
-from . import keyboards, texts
+from . import keyboards, notifications, texts
 from .max_api.client import MaxClient
 
 
@@ -145,8 +151,50 @@ def expire_photo_waits(now: datetime) -> None:
             )
 
 
-def mark_overdue(now: datetime) -> None:
+def mark_overdue(now: datetime, client=None) -> None:
     """Move tasks past planned time + tolerance to overdue and notify the owner once."""
+    sender = client
+    candidate_ids = TaskInstance.objects.filter(
+        overdue_notified_at__isnull=True,
+        completion__isnull=True,
+        template__is_active=True,
+        template__requires_claim=False,
+        template__store__is_active=True,
+    ).values_list("id", flat=True)
+
+    for instance_id in candidate_ids:
+        with transaction.atomic():
+            instance = (
+                TaskInstance.objects.select_for_update()
+                .select_related(
+                    "template__store__network__owner",
+                    "completion",
+                    "claim",
+                )
+                .filter(
+                    pk=instance_id,
+                    overdue_notified_at__isnull=True,
+                    completion__isnull=True,
+                )
+                .first()
+            )
+            if instance is None or evaluate_status(instance, now) != TaskStatus.OVERDUE:
+                continue
+            if sender is None:
+                sender = MaxClient()
+            notifications.notify_owner_overdue(instance, client=sender)
+            instance.status = TaskStatus.OVERDUE
+            instance.overdue_notified_at = now
+            instance.awaiting_photo_employee = None
+            instance.awaiting_photo_since = None
+            instance.save(
+                update_fields=[
+                    "status",
+                    "overdue_notified_at",
+                    "awaiting_photo_employee",
+                    "awaiting_photo_since",
+                ]
+            )
 
 
 def escalate_unclaimed(now: datetime) -> None:

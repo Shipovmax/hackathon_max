@@ -7,9 +7,11 @@ from apps.bot import texts
 from apps.bot.scheduler import (
     expire_photo_waits,
     generate_task_instances,
+    mark_overdue,
     send_reminders,
     send_shift_start_messages,
 )
+from apps.core.domain.lifecycle import mark_done
 from apps.core.models import (
     Employee,
     EmployeeStatus,
@@ -128,8 +130,11 @@ class GenerateTaskInstancesTests(TestCase):
 class RecordingClient:
     def __init__(self):
         self.sent = []
+        self.error = None
 
     def send_message(self, **kwargs):
+        if self.error:
+            raise self.error
         self.sent.append(kwargs)
 
 
@@ -326,6 +331,109 @@ class ExpirePhotoWaitsTests(TestCase):
         expire_photo_waits(self.requested_at + timedelta(minutes=11))
         self.instance.refresh_from_db()
         self.assertEqual(self.instance.status, TaskStatus.REMINDED)
+
+
+class MarkOverdueTests(TestCase):
+    def setUp(self):
+        self.owner = MaxAccount.objects.create(max_user_id=1)
+        network = Network.objects.create(owner=self.owner, name="Test network")
+        self.store = Store.objects.create(
+            network=network,
+            name="Lenina, 14",
+            open_time=time(9),
+            close_time=time(22),
+            timezone="Europe/Moscow",
+        )
+        self.template = TaskTemplate.objects.create(
+            store=self.store,
+            title="Open store",
+            planned_time=time(9),
+            tolerance_minutes=15,
+            requires_photo=False,
+        )
+        self.instance = TaskInstance.objects.create(
+            template=self.template,
+            date=date(2026, 9, 21),
+        )
+        self.deadline = datetime(2026, 9, 21, 6, 15, tzinfo=timezone.utc)
+        self.client = RecordingClient()
+
+    def test_marks_overdue_notifies_owner_and_adds_store_deep_link_once(self):
+        now = self.deadline + timedelta(seconds=1)
+
+        mark_overdue(now, client=self.client)
+        mark_overdue(now + timedelta(seconds=30), client=self.client)
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.OVERDUE)
+        self.assertEqual(self.instance.overdue_notified_at, now)
+        self.assertEqual(len(self.client.sent), 1)
+        notification = self.client.sent[0]
+        self.assertEqual(notification["user_id"], self.owner.max_user_id)
+        self.assertEqual(
+            notification["text"],
+            "Lenina, 14: задача «Open store» не отмечена. Плановое время — 09:00.",
+        )
+        self.assertTrue(
+            notification["buttons"][0][0]["url"].endswith(
+                f"?startapp=store_{self.store.id}_20260921"
+            )
+        )
+
+    def test_uses_strict_tolerance_boundary(self):
+        mark_overdue(self.deadline, client=self.client)
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.SCHEDULED)
+        self.assertEqual(self.client.sent, [])
+
+        mark_overdue(self.deadline + timedelta(seconds=1), client=self.client)
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.OVERDUE)
+        self.assertEqual(len(self.client.sent), 1)
+
+    def test_completed_and_claim_tasks_are_not_reported_as_overdue(self):
+        employee = Employee.objects.create(store=self.store, name="Anna")
+        mark_done(self.instance, employee, self.deadline - timedelta(minutes=10))
+        claim_template = TaskTemplate.objects.create(
+            store=self.store,
+            title="Delivery",
+            planned_time=time(9),
+            requires_photo=False,
+            requires_claim=True,
+        )
+        claim_instance = TaskInstance.objects.create(
+            template=claim_template,
+            date=self.instance.date,
+        )
+
+        mark_overdue(self.deadline + timedelta(seconds=1), client=self.client)
+
+        self.instance.refresh_from_db()
+        claim_instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.DONE_ON_TIME)
+        self.assertEqual(claim_instance.status, TaskStatus.SCHEDULED)
+        self.assertEqual(self.client.sent, [])
+
+    def test_past_day_becomes_missed_without_sending_a_late_overdue_alert(self):
+        mark_overdue(
+            datetime(2026, 9, 22, 9, tzinfo=timezone.utc),
+            client=self.client,
+        )
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.SCHEDULED)
+        self.assertIsNone(self.instance.overdue_notified_at)
+        self.assertEqual(self.client.sent, [])
+
+    def test_failed_notification_leaves_task_available_for_retry(self):
+        self.client.error = RuntimeError("MAX unavailable")
+
+        with self.assertRaisesRegex(RuntimeError, "MAX unavailable"):
+            mark_overdue(self.deadline + timedelta(seconds=1), client=self.client)
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.SCHEDULED)
+        self.assertIsNone(self.instance.overdue_notified_at)
 
 
 @override_settings(REMINDER_MINUTES_BEFORE=5)
