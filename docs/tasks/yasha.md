@@ -29,8 +29,16 @@ cd ~/hackathon_max && docker compose stop bot
 
 ## Задачи по порядку
 
-Задачи Y1–Y4 ни от кого не зависят, начинай с них. Y5 и дальше требуют, чтобы Толик закрыл
-свои T2 и T3 (`check_can_mark`, `mark_done`) — если их ещё нет, займись Y2–Y4.
+Всё, что нужно от ядра, уже готово и покрыто тестами, ждать Толика не нужно:
+
+- `apps.core.domain.permissions.check_can_mark(employee, instance, now)` возвращает
+  `MarkDecision`: `allowed`, `denial` (`day_off`, `not_started`, `ended`, `already_done`) и
+  данные для сообщения: `shift_start`, `shift_end`, `done_by`, `done_at`.
+- `apps.core.domain.lifecycle.mark_done(instance, employee, now, photo=None)` создаёт
+  `Completion`, считает опоздание и статус. `evaluate_status(instance, now)` даёт статус
+  задачи на момент `now`, `planned_at(instance)` — плановое время с часовым поясом точки.
+- `apps.core.domain.lifecycle.ensure_instances(store, date)` создаёт задачи дня по шаблонам и
+  безопасна при повторном вызове — используй её в Y2.
 
 ### Y1. Разобраться с ботом на живых данных
 

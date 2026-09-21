@@ -77,18 +77,18 @@ npm run dev                          # http://localhost:5173
 |---|---|---|
 | `backend/apps/core/models/` | 8 сущностей и миграция `0001_initial` | готово, первая версия схемы, можно менять |
 | `backend/apps/core/management/commands/seed_demo.py` | демо-сеть, сотрудники, коды, график, задачи на сегодня | готово |
-| `backend/apps/core/domain/permissions.py` | `check_can_mark`: право на отметку по смене | заглушка |
-| `backend/apps/core/domain/coverage.py` | `find_gaps`: незакрытые окна графика | заглушка |
-| `backend/apps/core/domain/lifecycle.py` | плановое время, статус задачи, `mark_done` | заглушки |
+| `backend/apps/core/domain/permissions.py` | `check_can_mark`: право на отметку по смене, с причиной отказа | готово, есть тесты |
+| `backend/apps/core/domain/coverage.py` | `find_gaps`: незакрытые окна графика с допуском на границах | готово, есть тесты |
+| `backend/apps/core/domain/lifecycle.py`, `day.py` | плановое время, статус задачи, `mark_done`, создание задач дня | готово, есть тесты |
 | `backend/apps/api/auth.py` | проверка подписи MAX и вход владельца (403 `not_owner` для остальных) | готово, есть тесты |
-| `backend/apps/api/views.py`, `urls.py` | `/api/health/` и `/api/me/` работают, остальные эндпоинты отвечают 501 | частично |
+| `backend/apps/api/views/`, `urls.py`, `presenters.py`, `scoping.py` | все эндпоинты мини-приложения, проверка владения сетью, валидация | готово, есть тесты |
 | `backend/apps/bot/max_api/client.py` | клиент MAX API: `get_me`, `get_updates`, `send_message`, `answer_callback`, `download_file` | готово |
 | `backend/apps/bot/handlers/onboarding.py` | `/start`, выбор роли, `/role`, привязка сотрудника по коду | готово, есть тесты |
 | `backend/apps/bot/handlers/tasks.py` | «Выполнено», фото, «Беру», «что осталось» | заглушки |
 | `backend/apps/bot/scheduler.py` | 6 задач планировщика, цикл в `run_scheduler` | цикл готов, задачи пустые |
 | `backend/apps/bot/notifications.py` | 3 уведомления владельцу | заглушки |
 | `backend/apps/bot/texts.py`, `keyboards.py` | формулировки сообщений и кнопки | готово |
-| `frontend/src/screens/` | 5 экранов владельца | готово на демо-данных, реальные данные ждут API |
+| `frontend/src/screens/` | 5 экранов владельца с редактированием | готово; на демо-данных (`VITE_USE_MOCKS=1`) и с настоящим API |
 | `Dockerfile`, `compose.yaml`, `deploy/` | сборка и запуск | проверено на сервере: сборка около 75 секунд, все сервисы поднимаются, https работает |
 | README: тестовые данные и шаги проверки | нужны для сдачи | заполнить |
 
@@ -96,15 +96,15 @@ npm run dev                          # http://localhost:5173
 
 ### Как проверить бота вручную
 
-Данные пока создаются через админку (`http://localhost:8000/admin/`), потому что REST-эндпоинты ещё заглушки.
+Проще всего залить демо-данные командой `seed_demo` (см. выше): она создаёт точки, сотрудников с кодами приглашения, график и задачи. Владельцем становится указанный MAX id. Точки, сотрудников и график можно вести и в самом мини-приложении.
 
 1. Запустите `run_bot`, откройте бота в MAX, отправьте `/start` и нажмите «Я владелец». Создастся сеть «Моя сеть».
-2. В админке добавьте точку (`Store`, в поле сети выберите «Моя сеть»), сотрудника (`Employee`) и код приглашения (`InviteCode`, например `TEST1234`).
+2. Выполните `python manage.py seed_demo --owner-max-id <ваш MAX id>` — она напечатает коды приглашения. Либо добавьте точку и сотрудника в мини-приложении, код покажется рядом с сотрудником.
 3. В MAX отправьте боту `/role`, нажмите «Я сотрудник» и пришлите код. Бот ответит «Готово. Вы подключены к точке …».
 
 Один аккаунт MAX может быть и владельцем, и сотрудником: роль переключается командой `/role`.
 
-### Контракт API мини-приложения (черновик)
+### Контракт API мини-приложения
 
 Авторизация: заголовок `X-Max-Init-Data` со значением `window.WebApp.initData`. Формы ответов описаны в [frontend/src/api/types.ts](frontend/src/api/types.ts).
 
@@ -112,17 +112,18 @@ npm run dev                          # http://localhost:5173
 |---|---|---|
 | `GET /api/health/` | проверка сервера | готово |
 | `GET /api/me/` | вход, роль, сеть | готово |
-| `GET /api/dashboard/` | Сводка | 501 |
-| `GET /api/stores/`, `POST`, `GET/PATCH /api/stores/{id}/` | Точки и сотрудники | 501 |
-| `GET /api/stores/{id}/day/?date=` | Карточка точки | 501 |
-| `GET/PUT /api/stores/{id}/schedule/?week=` | График | 501 |
-| `GET /api/stores/{id}/schedule/coverage/?week=` | График: окна | 501 |
-| `POST /api/stores/{id}/schedule/publish/?week=` | График: публикация | 501 |
-| `PATCH /api/shifts/{id}/` | правка опубликованного дня | 501 |
-| `GET/POST /api/stores/{id}/task-templates/`, `PATCH/DELETE /api/task-templates/{id}/` | Задачи точки | 501 |
-| `GET/POST /api/stores/{id}/employees/`, `POST /api/employees/{id}/invite/`, `POST /api/employees/{id}/dismiss/` | Точки и сотрудники | 501 |
-| `GET /api/completions/{id}/photo/` | фото отметки (только владельцу) | 501 |
-| `/api/network/` | переименование сети | 501 |
+| `GET /api/dashboard/?date=` | Сводка: точки с проблемами сверху | готово |
+| `GET /api/stores/{id}/day/?date=` | Карточка точки: задачи дня, кто отметил, кто на смене | готово |
+| `GET/POST /api/stores/` | Точки и сотрудники | готово |
+| `POST /api/stores/{id}/employees/`, `POST /api/employees/{id}/invite/`, `POST /api/employees/{id}/dismiss/` | код приглашения, увольнение (история остаётся) | готово |
+| `GET/POST /api/stores/{id}/task-templates/`, `PATCH/DELETE /api/task-templates/{id}/` | Задачи точки (удаление скрывает задачу, история остаётся) | готово |
+| `GET/PUT /api/stores/{id}/schedule/?week=` | График: чтение и сохранение (опубликованная неделя остаётся опубликованной) | готово |
+| `POST /api/stores/{id}/schedule/coverage/` | проверка покрытия черновика без сохранения | готово |
+| `POST /api/stores/{id}/schedule/publish/` | публикация недели | готово |
+| `GET /api/completions/{id}/photo/` | фото отметки, только владельцу этой сети | готово |
+| `/api/network/`, `PATCH /api/stores/{id}/` | переименование сети и точки | 501, фронтенд их пока не вызывает |
+
+Ошибки приходят как `{"detail": "текст"}`: 400 для неверных данных, 404 для чужих или несуществующих объектов, 409 для действий, которые сейчас невозможны.
 
 ### Правила работы
 

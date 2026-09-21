@@ -62,5 +62,5 @@ class ApiEndpointTests(TestCase):
 
     def test_stub_endpoint_reports_not_implemented(self):
         MaxAccount.objects.create(max_user_id=444, role=Role.OWNER)
-        response = self.client.get("/api/dashboard/", HTTP_X_MAX_INIT_DATA=signed_init_data(444))
+        response = self.client.get("/api/network/", HTTP_X_MAX_INIT_DATA=signed_init_data(444))
         self.assertEqual(response.status_code, 501)
