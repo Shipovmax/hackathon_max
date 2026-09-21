@@ -5,9 +5,11 @@ from django.test.utils import override_settings
 
 from apps.bot import texts
 from apps.bot.scheduler import (
+    escalate_unclaimed,
     expire_photo_waits,
     generate_task_instances,
     mark_overdue,
+    send_claim_requests,
     send_closing_notifications,
     send_reminders,
     send_shift_start_messages,
@@ -665,6 +667,159 @@ class ShiftSummariesTests(TestCase):
         self.assertEqual(self.client.sent, [])
         self.shift.refresh_from_db()
         self.assertIsNone(self.shift.summary_sent_at)
+
+
+@override_settings(CLAIM_ESCALATION_MINUTES_BEFORE=15, REMINDER_MINUTES_BEFORE=5)
+class ClaimSchedulerTests(TestCase):
+    def setUp(self):
+        self.owner = MaxAccount.objects.create(max_user_id=1)
+        network = Network.objects.create(owner=self.owner, name="Test network")
+        self.store = Store.objects.create(
+            network=network,
+            name="Lenina, 14",
+            open_time=time(9),
+            close_time=time(22),
+            timezone="Europe/Moscow",
+        )
+        self.accounts = [
+            MaxAccount.objects.create(max_user_id=101),
+            MaxAccount.objects.create(max_user_id=102),
+        ]
+        self.employees = []
+        for name, account in zip(("Anna", "Igor"), self.accounts):
+            employee = Employee.objects.create(store=self.store, name=name, account=account)
+            self.employees.append(employee)
+            Shift.objects.create(
+                employee=employee,
+                store=self.store,
+                date=date(2026, 9, 21),
+                start_time=time(9),
+                end_time=time(17),
+                status=ShiftStatus.PUBLISHED,
+            )
+        self.template = TaskTemplate.objects.create(
+            store=self.store,
+            title="Delivery",
+            planned_time=time(14),
+            requires_photo=False,
+            requires_claim=True,
+        )
+        self.instance = TaskInstance.objects.create(
+            template=self.template,
+            date=date(2026, 9, 21),
+        )
+        self.shift_start = datetime(2026, 9, 21, 6, tzinfo=timezone.utc)
+        self.planned = datetime(2026, 9, 21, 11, tzinfo=timezone.utc)
+        self.client = RecordingClient()
+
+    def test_asks_each_responsible_employee_at_shift_start_only_once(self):
+        send_claim_requests(self.shift_start, client=self.client)
+        send_claim_requests(self.shift_start + timedelta(seconds=30), client=self.client)
+
+        self.assertCountEqual(
+            [message["user_id"] for message in self.client.sent],
+            [account.max_user_id for account in self.accounts],
+        )
+        for message in self.client.sent:
+            self.assertEqual(message["text"], "Сегодня в 14:00 delivery. Кто принимает?")
+            self.assertEqual(
+                message["buttons"][0][0]["payload"],
+                f"claim:{self.instance.id}",
+            )
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.reminder_sent_at, self.shift_start)
+        self.assertEqual(self.instance.status, TaskStatus.REMINDED)
+
+    def test_does_not_ask_before_first_responsible_shift_starts(self):
+        send_claim_requests(self.shift_start - timedelta(seconds=1), client=self.client)
+
+        self.assertEqual(self.client.sent, [])
+        self.instance.refresh_from_db()
+        self.assertIsNone(self.instance.reminder_sent_at)
+
+    def test_regular_done_reminder_is_not_sent_to_entire_shift_for_claim_task(self):
+        send_reminders(
+            self.planned - timedelta(minutes=5),
+            client=self.client,
+        )
+
+        self.assertEqual(self.client.sent, [])
+        self.instance.refresh_from_db()
+        self.assertIsNone(self.instance.reminder_sent_at)
+
+    def test_escalates_to_shift_fifteen_minutes_before_deadline_once(self):
+        escalation_at = self.planned - timedelta(minutes=15)
+
+        escalate_unclaimed(escalation_at, client=self.client)
+        escalate_unclaimed(escalation_at + timedelta(seconds=30), client=self.client)
+
+        self.assertEqual(len(self.client.sent), 2)
+        for message in self.client.sent:
+            self.assertEqual(
+                message["text"],
+                "Delivery в 14:00 ещё никто не взял. Осталось 15 минут.",
+            )
+            self.assertEqual(
+                message["buttons"][0][0]["payload"],
+                f"claim:{self.instance.id}",
+            )
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.escalation_sent_at, escalation_at)
+
+    def test_notifies_owner_at_deadline_and_marks_task_unclaimed_once(self):
+        escalate_unclaimed(self.planned, client=self.client)
+        escalate_unclaimed(self.planned + timedelta(seconds=30), client=self.client)
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.UNCLAIMED)
+        self.assertEqual(self.instance.overdue_notified_at, self.planned)
+        self.assertEqual(len(self.client.sent), 1)
+        notification = self.client.sent[0]
+        self.assertEqual(notification["user_id"], self.owner.max_user_id)
+        self.assertEqual(
+            notification["text"],
+            "Lenina, 14: задачу «Delivery» в 14:00 никто не взял.",
+        )
+        self.assertTrue(
+            notification["buttons"][0][0]["url"].endswith(
+                f"?startapp=store_{self.store.id}_20260921"
+            )
+        )
+
+    def test_claimed_task_is_not_escalated_or_reported_unclaimed(self):
+        Claim.objects.create(instance=self.instance, employee=self.employees[0])
+
+        escalate_unclaimed(
+            self.planned - timedelta(minutes=15),
+            client=self.client,
+        )
+        escalate_unclaimed(self.planned, client=self.client)
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.client.sent, [])
+        self.assertIsNone(self.instance.escalation_sent_at)
+        self.assertIsNone(self.instance.overdue_notified_at)
+
+    def test_failed_owner_notification_remains_available_for_retry(self):
+        self.client.error = RuntimeError("MAX unavailable")
+
+        with self.assertRaisesRegex(RuntimeError, "MAX unavailable"):
+            escalate_unclaimed(self.planned, client=self.client)
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.SCHEDULED)
+        self.assertIsNone(self.instance.overdue_notified_at)
+
+    def test_does_not_send_stale_unclaimed_alert_on_a_later_day(self):
+        escalate_unclaimed(
+            self.planned + timedelta(days=1),
+            client=self.client,
+        )
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.client.sent, [])
+        self.assertEqual(self.instance.status, TaskStatus.SCHEDULED)
+        self.assertIsNone(self.instance.overdue_notified_at)
 
 
 @override_settings(REMINDER_MINUTES_BEFORE=5)

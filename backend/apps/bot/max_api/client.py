@@ -64,13 +64,22 @@ class MaxClient:
         params = {"user_id": user_id} if user_id is not None else {"chat_id": chat_id}
         return self._request("POST", "/messages", params=params, json=body)
 
-    def answer_callback(self, callback_id: str, *, text: str) -> dict:
-        # Replaces the message that carried the pressed button; empty attachments removes the keyboard.
+    def answer_callback(
+        self,
+        callback_id: str,
+        *,
+        text: str,
+        buttons: list[list[dict]] | None = None,
+    ) -> dict:
+        # Replaces the message that carried the pressed button.
+        attachments = []
+        if buttons:
+            attachments = [{"type": "inline_keyboard", "payload": {"buttons": buttons}}]
         return self._request(
             "POST",
             "/answers",
             params={"callback_id": callback_id},
-            json={"message": {"text": text, "attachments": []}},
+            json={"message": {"text": text, "attachments": attachments}},
         )
 
     def download_file(self, url: str) -> bytes:

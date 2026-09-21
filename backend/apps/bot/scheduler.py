@@ -69,6 +69,65 @@ def send_shift_start_messages(now: datetime, client=None) -> None:
         shift.save(update_fields=["start_notified_at"])
 
 
+def _claim_shifts(instance):
+    return list(
+        Shift.objects.filter(
+            store=instance.template.store,
+            date=instance.date,
+            status=ShiftStatus.PUBLISHED,
+            start_time__lte=instance.template.planned_time,
+            end_time__gte=instance.template.planned_time,
+            employee__status=EmployeeStatus.ACTIVE,
+            employee__account__isnull=False,
+        )
+        .select_related("employee__account")
+        .order_by("start_time", "employee__name")
+    )
+
+
+def send_claim_requests(now: datetime, client=None) -> None:
+    """Ask the responsible shift who will take each claim task."""
+    sender = client
+    instances = TaskInstance.objects.filter(
+        template__requires_claim=True,
+        template__is_active=True,
+        template__store__is_active=True,
+        reminder_sent_at__isnull=True,
+        claim__isnull=True,
+        completion__isnull=True,
+    ).select_related("template__store")
+
+    for instance in instances:
+        shifts = _claim_shifts(instance)
+        if not shifts:
+            continue
+        zone = store_zone(instance.template.store)
+        first_shift_start = min(
+            datetime.combine(shift.date, shift.start_time, tzinfo=zone) for shift in shifts
+        )
+        if not first_shift_start <= now < planned_at(instance):
+            continue
+        if sender is None:
+            sender = MaxClient()
+        sent_to = set()
+        for shift in shifts:
+            user_id = shift.employee.account.max_user_id
+            if user_id in sent_to:
+                continue
+            sent_to.add(user_id)
+            sender.send_message(
+                user_id=user_id,
+                text=texts.claim_question(
+                    instance.template.planned_time.strftime("%H:%M"),
+                    instance.template.title,
+                ),
+                buttons=keyboards.claim_button(instance.id),
+            )
+        instance.reminder_sent_at = now
+        instance.status = TaskStatus.REMINDED
+        instance.save(update_fields=["reminder_sent_at", "status"])
+
+
 def send_reminders(now: datetime, client=None) -> None:
     """Reminder with the «Выполнено» button REMINDER_MINUTES_BEFORE minutes before the planned time."""
     lead_time = timedelta(minutes=settings.REMINDER_MINUTES_BEFORE)
@@ -77,6 +136,7 @@ def send_reminders(now: datetime, client=None) -> None:
         reminder_sent_at__isnull=True,
         status=TaskStatus.SCHEDULED,
         template__is_active=True,
+        template__requires_claim=False,
         template__store__is_active=True,
     ).select_related("template__store")
 
@@ -231,8 +291,73 @@ def send_closing_notifications(now: datetime, client=None) -> None:
             instance.save(update_fields=["closing_notified_at"])
 
 
-def escalate_unclaimed(now: datetime) -> None:
+def escalate_unclaimed(now: datetime, client=None) -> None:
     """Claim tasks: repeat the question CLAIM_ESCALATION_MINUTES_BEFORE minutes before, tell the owner at the deadline."""
+    sender = client
+    instance_ids = TaskInstance.objects.filter(
+        template__requires_claim=True,
+        template__is_active=True,
+        template__store__is_active=True,
+        claim__isnull=True,
+        completion__isnull=True,
+    ).values_list("id", flat=True)
+    escalation_delta = timedelta(minutes=settings.CLAIM_ESCALATION_MINUTES_BEFORE)
+
+    for instance_id in instance_ids:
+        with transaction.atomic():
+            instance = (
+                TaskInstance.objects.select_for_update()
+                .select_related(
+                    "template__store__network__owner",
+                    "claim",
+                    "completion",
+                )
+                .filter(
+                    pk=instance_id,
+                    claim__isnull=True,
+                    completion__isnull=True,
+                )
+                .first()
+            )
+            if instance is None:
+                continue
+            if instance.date != store_today(instance.template.store, now):
+                continue
+            planned = planned_at(instance)
+            if now >= planned:
+                if instance.overdue_notified_at is not None:
+                    continue
+                if sender is None:
+                    sender = MaxClient()
+                notifications.notify_owner_unclaimed(instance, client=sender)
+                instance.status = TaskStatus.UNCLAIMED
+                instance.overdue_notified_at = now
+                instance.save(update_fields=["status", "overdue_notified_at"])
+                continue
+            if now < planned - escalation_delta or instance.escalation_sent_at is not None:
+                continue
+            shifts = _claim_shifts(instance)
+            if not shifts:
+                continue
+            if sender is None:
+                sender = MaxClient()
+            sent_to = set()
+            for shift in shifts:
+                user_id = shift.employee.account.max_user_id
+                if user_id in sent_to:
+                    continue
+                sent_to.add(user_id)
+                sender.send_message(
+                    user_id=user_id,
+                    text=texts.claim_escalation(
+                        instance.template.title,
+                        instance.template.planned_time.strftime("%H:%M"),
+                        settings.CLAIM_ESCALATION_MINUTES_BEFORE,
+                    ),
+                    buttons=keyboards.claim_button(instance.id),
+                )
+            instance.escalation_sent_at = now
+            instance.save(update_fields=["escalation_sent_at"])
 
 
 def send_shift_summaries(now: datetime, client=None) -> None:
@@ -300,6 +425,7 @@ def send_shift_summaries(now: datetime, client=None) -> None:
 def tick(now: datetime) -> None:
     generate_task_instances(now)
     send_shift_start_messages(now)
+    send_claim_requests(now)
     send_reminders(now)
     expire_photo_waits(now)
     mark_overdue(now)

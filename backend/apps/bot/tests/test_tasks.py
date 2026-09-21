@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.test.utils import override_settings
 
 from apps.bot import texts
-from apps.bot.handlers.tasks import on_done, on_photo, on_status
+from apps.bot.handlers.tasks import on_claim, on_done, on_photo, on_status
 from apps.core.domain.lifecycle import mark_done
 from apps.core.models import (
     Claim,
@@ -30,13 +30,15 @@ NOW = datetime(2026, 9, 21, 7, 3, tzinfo=timezone.utc)  # 10:03 in Moscow
 class RecordingClient:
     def __init__(self):
         self.answers = []
+        self.answer_buttons = []
         self.sent = []
         self.downloaded_urls = []
         self.download_result = b"test-image-bytes"
         self.download_error = None
 
-    def answer_callback(self, callback_id, *, text):
+    def answer_callback(self, callback_id, *, text, buttons=None):
         self.answers.append((callback_id, text))
+        self.answer_buttons.append((callback_id, buttons))
 
     def send_message(self, **kwargs):
         self.sent.append(kwargs)
@@ -522,3 +524,115 @@ class StatusHandlerTests(TestCase):
             self.client.sent,
             [{"user_id": unbound.max_user_id, "text": texts.ROLE_EMPLOYEE_ASK_CODE}],
         )
+
+
+class ClaimHandlerTests(TestCase):
+    def setUp(self):
+        owner = MaxAccount.objects.create(max_user_id=1)
+        network = Network.objects.create(owner=owner, name="Test network")
+        self.store = Store.objects.create(
+            network=network,
+            name="Lenina, 14",
+            open_time=time(9),
+            close_time=time(22),
+            timezone="Europe/Moscow",
+        )
+        self.anna_account = MaxAccount.objects.create(max_user_id=101)
+        self.anna = Employee.objects.create(
+            store=self.store,
+            name="Anna",
+            account=self.anna_account,
+        )
+        self.igor_account = MaxAccount.objects.create(max_user_id=102)
+        self.igor = Employee.objects.create(
+            store=self.store,
+            name="Igor",
+            account=self.igor_account,
+        )
+        for employee in (self.anna, self.igor):
+            Shift.objects.create(
+                employee=employee,
+                store=self.store,
+                date=DAY,
+                start_time=time(9),
+                end_time=time(17),
+                status=ShiftStatus.PUBLISHED,
+            )
+        template = TaskTemplate.objects.create(
+            store=self.store,
+            title="Delivery",
+            planned_time=time(14),
+            requires_photo=False,
+            requires_claim=True,
+        )
+        self.instance = TaskInstance.objects.create(template=template, date=DAY)
+        self.client = RecordingClient()
+
+    def claim(self, account, callback_id="claim-callback"):
+        with mock.patch("apps.bot.handlers.tasks.timezone.now", return_value=NOW):
+            on_claim(self.client, account, callback_id, self.instance.id)
+
+    def test_first_employee_claims_task_and_others_are_told(self):
+        self.claim(self.anna_account)
+
+        claim = Claim.objects.get(instance=self.instance)
+        self.assertEqual(claim.employee, self.anna)
+        self.assertEqual(
+            self.client.answers,
+            [("claim-callback", texts.claim_confirmed())],
+        )
+        self.assertEqual(
+            self.client.answer_buttons[0][1][0][0]["payload"],
+            f"done:{self.instance.id}",
+        )
+        self.assertEqual(
+            self.client.sent,
+            [
+                {
+                    "user_id": self.igor_account.max_user_id,
+                    "text": "Delivery в 14:00 выполняет Anna.",
+                }
+            ],
+        )
+
+    def test_second_employee_sees_who_already_claimed_task(self):
+        self.claim(self.anna_account, "first")
+        self.client.answers.clear()
+        self.client.answer_buttons.clear()
+        self.client.sent.clear()
+
+        self.claim(self.igor_account, "second")
+
+        self.assertEqual(Claim.objects.filter(instance=self.instance).count(), 1)
+        self.assertEqual(
+            self.client.answers,
+            [("second", "Delivery в 14:00 выполняет Anna.")],
+        )
+        self.assertEqual(self.client.answer_buttons, [("second", None)])
+        self.assertEqual(self.client.sent, [])
+
+    def test_employee_without_shift_covering_task_cannot_claim(self):
+        Shift.objects.filter(employee=self.anna).update(start_time=time(15), end_time=time(20))
+
+        self.claim(self.anna_account)
+
+        self.assertFalse(Claim.objects.filter(instance=self.instance).exists())
+        self.assertEqual(
+            self.client.answers,
+            [("claim-callback", texts.CLAIM_NOT_AVAILABLE)],
+        )
+
+    def test_claim_task_can_only_be_completed_by_the_winner(self):
+        with mock.patch("apps.bot.handlers.tasks.timezone.now", return_value=NOW):
+            on_done(self.client, self.anna_account, "before-claim", self.instance.id)
+        self.assertEqual(self.client.answers[-1], ("before-claim", texts.CLAIM_REQUIRED))
+
+        self.claim(self.anna_account)
+        with mock.patch("apps.bot.handlers.tasks.timezone.now", return_value=NOW):
+            on_done(self.client, self.igor_account, "wrong", self.instance.id)
+            on_done(self.client, self.anna_account, "winner", self.instance.id)
+
+        self.assertIn(("wrong", "Delivery в 14:00 выполняет Anna."), self.client.answers)
+        self.assertIn(("winner", "Delivery отмечено в 10:03"), self.client.answers)
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.completion.employee, self.anna)

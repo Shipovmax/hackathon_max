@@ -42,6 +42,16 @@ def notify_owner_closed_late(instance, client=None) -> None:
     )
 
 
-def notify_owner_unclaimed(instance) -> None:
+def notify_owner_unclaimed(instance, client=None) -> None:
     """«Задачу никто не взял»: a claim task nobody took by its planned time."""
-    raise NotImplementedError
+    store = instance.template.store
+    sender = client or MaxClient()
+    sender.send_message(
+        user_id=store.network.owner.max_user_id,
+        text=texts.owner_unclaimed(
+            store.name,
+            instance.template.title,
+            planned_at(instance).strftime("%H:%M"),
+        ),
+        buttons=_store_deep_link(instance),
+    )

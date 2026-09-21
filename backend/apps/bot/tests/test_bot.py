@@ -1,9 +1,11 @@
 from datetime import time
+from unittest import mock
 
 from django.test import SimpleTestCase, TestCase
 
 from apps.bot import keyboards, texts
 from apps.bot.handlers.onboarding import bind_by_code, on_role_chosen
+from apps.bot.max_api.client import MaxClient
 from apps.core.models import Employee, InviteCode, MaxAccount, Network, Role, Store
 
 
@@ -31,6 +33,29 @@ class TextsTests(SimpleTestCase):
     def test_parse_callback(self):
         self.assertEqual(keyboards.parse_callback("done:42"), ("done", "42"))
         self.assertEqual(keyboards.parse_callback(""), ("", ""))
+
+
+class MaxClientTests(SimpleTestCase):
+    def test_callback_answer_can_replace_keyboard(self):
+        client = object.__new__(MaxClient)
+        client._request = mock.Mock(return_value={})
+        buttons = keyboards.done_button(42)
+
+        client.answer_callback("callback-1", text="Task is yours", buttons=buttons)
+
+        client._request.assert_called_once_with(
+            "POST",
+            "/answers",
+            params={"callback_id": "callback-1"},
+            json={
+                "message": {
+                    "text": "Task is yours",
+                    "attachments": [
+                        {"type": "inline_keyboard", "payload": {"buttons": buttons}}
+                    ],
+                }
+            },
+        )
 
 
 class OnboardingTests(TestCase):
