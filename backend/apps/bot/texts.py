@@ -36,7 +36,8 @@ def code_accepted(store_name: str) -> str:
 
 def shift_started(store_name: str, until: str, tasks: list[tuple[str, str]]) -> str:
     lines = "\n".join(f"{at} {title}" for at, title in tasks)
-    return f"Смена началась. {store_name} · до {until}\n\n{lines}"
+    heading = f"Смена началась. {store_name} · до {until}"
+    return f"{heading}\n\n{lines}" if lines else heading
 
 
 def reminder(minutes_left: int, task_title: str) -> str:

@@ -4,7 +4,11 @@ from django.test import TestCase
 from django.test.utils import override_settings
 
 from apps.bot import texts
-from apps.bot.scheduler import generate_task_instances, send_reminders
+from apps.bot.scheduler import (
+    generate_task_instances,
+    send_reminders,
+    send_shift_start_messages,
+)
 from apps.core.models import (
     Employee,
     EmployeeStatus,
@@ -126,6 +130,146 @@ class RecordingClient:
 
     def send_message(self, **kwargs):
         self.sent.append(kwargs)
+
+
+class SendShiftStartMessagesTests(TestCase):
+    def setUp(self):
+        owner = MaxAccount.objects.create(max_user_id=1)
+        network = Network.objects.create(owner=owner, name="Test network")
+        self.store = Store.objects.create(
+            network=network,
+            name="Lenina, 14",
+            open_time=time(9),
+            close_time=time(22),
+            timezone="Europe/Moscow",
+        )
+        self.employee_account = MaxAccount.objects.create(max_user_id=101)
+        self.employee = Employee.objects.create(
+            store=self.store,
+            name="Anna",
+            account=self.employee_account,
+        )
+        self.shift = Shift.objects.create(
+            employee=self.employee,
+            store=self.store,
+            date=date(2026, 9, 21),
+            start_time=time(9),
+            end_time=time(17),
+            status=ShiftStatus.PUBLISHED,
+        )
+        self.client = RecordingClient()
+        self.starts_at = datetime(2026, 9, 21, 6, tzinfo=timezone.utc)
+
+    def template(self, title, planned_time, **kwargs):
+        return TaskTemplate.objects.create(
+            store=self.store,
+            title=title,
+            planned_time=planned_time,
+            **kwargs,
+        )
+
+    def test_sends_sorted_tasks_and_marks_shift_as_notified(self):
+        self.template("Prepare sales floor", time(10))
+        self.template("Open store", time(9))
+        self.template(
+            "Delivery",
+            time(14),
+            kind=TaskKind.ONE_TIME,
+            on_date=self.shift.date,
+        )
+
+        send_shift_start_messages(self.starts_at, client=self.client)
+
+        self.assertEqual(
+            self.client.sent,
+            [
+                {
+                    "user_id": self.employee_account.max_user_id,
+                    "text": (
+                        "Смена началась. Lenina, 14 · до 17:00\n\n"
+                        "09:00 Open store\n"
+                        "10:00 Prepare sales floor\n"
+                        "14:00 Delivery"
+                    ),
+                }
+            ],
+        )
+        self.shift.refresh_from_db()
+        self.assertEqual(self.shift.start_notified_at, self.starts_at)
+
+    def test_does_not_send_shift_start_twice(self):
+        send_shift_start_messages(self.starts_at, client=self.client)
+        send_shift_start_messages(self.starts_at + timedelta(seconds=30), client=self.client)
+
+        self.assertEqual(len(self.client.sent), 1)
+
+    def test_uses_first_tick_during_shift_but_not_before_or_after_it(self):
+        send_shift_start_messages(self.starts_at - timedelta(seconds=1), client=self.client)
+        self.assertEqual(self.client.sent, [])
+
+        delayed_tick = self.starts_at + timedelta(minutes=20)
+        send_shift_start_messages(delayed_tick, client=self.client)
+        self.assertEqual(len(self.client.sent), 1)
+        self.shift.refresh_from_db()
+        self.assertEqual(self.shift.start_notified_at, delayed_tick)
+
+        self.shift.start_notified_at = None
+        self.shift.save(update_fields=["start_notified_at"])
+        send_shift_start_messages(
+            datetime(2026, 9, 21, 14, tzinfo=timezone.utc),
+            client=self.client,
+        )
+        self.assertEqual(len(self.client.sent), 1)
+
+    def test_ignores_inactive_and_non_matching_task_templates(self):
+        self.template("Active daily", time(9))
+        self.template("Inactive", time(10), is_active=False)
+        self.template(
+            "Other date",
+            time(11),
+            kind=TaskKind.ONE_TIME,
+            on_date=date(2026, 9, 22),
+        )
+
+        send_shift_start_messages(self.starts_at, client=self.client)
+
+        self.assertIn("09:00 Active daily", self.client.sent[0]["text"])
+        self.assertNotIn("Inactive", self.client.sent[0]["text"])
+        self.assertNotIn("Other date", self.client.sent[0]["text"])
+
+    def test_sends_header_without_blank_task_section_when_store_has_no_tasks(self):
+        send_shift_start_messages(self.starts_at, client=self.client)
+
+        self.assertEqual(
+            self.client.sent[0]["text"],
+            "Смена началась. Lenina, 14 · до 17:00",
+        )
+
+    def test_skips_draft_unbound_and_inactive_employees(self):
+        cases = [
+            (ShiftStatus.DRAFT, self.employee_account, EmployeeStatus.ACTIVE),
+            (ShiftStatus.PUBLISHED, None, EmployeeStatus.ACTIVE),
+            (ShiftStatus.PUBLISHED, self.employee_account, EmployeeStatus.DISMISSED),
+        ]
+        for shift_status, account, employee_status in cases:
+            with self.subTest(
+                shift_status=shift_status,
+                has_account=account is not None,
+                employee_status=employee_status,
+            ):
+                self.shift.status = shift_status
+                self.shift.start_notified_at = None
+                self.shift.save(update_fields=["status", "start_notified_at"])
+                self.employee.account = account
+                self.employee.status = employee_status
+                self.employee.save(update_fields=["account", "status"])
+                self.client.sent.clear()
+
+                send_shift_start_messages(self.starts_at, client=self.client)
+
+                self.assertEqual(self.client.sent, [])
+                self.shift.refresh_from_db()
+                self.assertIsNone(self.shift.start_notified_at)
 
 
 @override_settings(REMINDER_MINUTES_BEFORE=5)

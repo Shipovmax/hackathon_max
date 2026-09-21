@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from django.conf import settings
 
-from apps.core.domain.lifecycle import ensure_instances, planned_at, store_today
+from apps.core.domain.lifecycle import ensure_instances, planned_at, store_today, store_zone
 from apps.core.models import (
     EmployeeStatus,
     Shift,
@@ -22,8 +22,44 @@ def generate_task_instances(now: datetime) -> None:
         ensure_instances(store, store_today(store, now))
 
 
-def send_shift_start_messages(now: datetime) -> None:
+def send_shift_start_messages(now: datetime, client=None) -> None:
     """Message each employee whose published shift starts now with the task list."""
+    sender = client
+    shifts = Shift.objects.filter(
+        status=ShiftStatus.PUBLISHED,
+        start_notified_at__isnull=True,
+        store__is_active=True,
+        employee__status=EmployeeStatus.ACTIVE,
+        employee__account__isnull=False,
+    ).select_related("store", "employee__account")
+
+    for shift in shifts:
+        zone = store_zone(shift.store)
+        starts_at = datetime.combine(shift.date, shift.start_time, tzinfo=zone)
+        ends_at = datetime.combine(shift.date, shift.end_time, tzinfo=zone)
+        if not starts_at <= now < ends_at:
+            continue
+
+        instances = ensure_instances(shift.store, shift.date)
+        task_rows = [
+            (instance.template.planned_time.strftime("%H:%M"), instance.template.title)
+            for instance in sorted(
+                instances,
+                key=lambda item: item.template.planned_time,
+            )
+        ]
+        if sender is None:
+            sender = MaxClient()
+        sender.send_message(
+            user_id=shift.employee.account.max_user_id,
+            text=texts.shift_started(
+                shift.store.name,
+                shift.end_time.strftime("%H:%M"),
+                task_rows,
+            ),
+        )
+        shift.start_notified_at = now
+        shift.save(update_fields=["start_notified_at"])
 
 
 def send_reminders(now: datetime, client=None) -> None:
