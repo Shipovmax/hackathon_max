@@ -145,11 +145,23 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
     <Screen title="График смен" subtitle={`${formatWeekRange(data.week_start)} · ${data.status === 'draft' ? 'черновик' : 'опубликован'}`} back>
       <div className="screen__block">
         <div className="datenav">
-          <IconButton size="small" variant="secondary" aria-label="Предыдущая неделя" onClick={() => onWeek(addDays(week, -7))}>
+          <IconButton
+            size="small"
+            variant="secondary"
+            aria-label="Предыдущая неделя"
+            disabled={dirty}
+            onClick={() => onWeek(addDays(week, -7))}
+          >
             ‹
           </IconButton>
           <Typography.Body variant="medium-strong">{formatWeekRange(data.week_start)}</Typography.Body>
-          <IconButton size="small" variant="secondary" aria-label="Следующая неделя" onClick={() => onWeek(addDays(week, 7))}>
+          <IconButton
+            size="small"
+            variant="secondary"
+            aria-label="Следующая неделя"
+            disabled={dirty}
+            onClick={() => onWeek(addDays(week, 7))}
+          >
             ›
           </IconButton>
         </div>
@@ -220,6 +232,15 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
           </div>
         )}
 
+        {dirty && (
+          <div className="alert">
+            <Typography.Body variant="medium">
+              Правки пока только на экране. {data.status === 'draft' ? 'Опубликуйте' : 'Сохраните'} их, чтобы график
+              увидели сотрудники.
+            </Typography.Body>
+          </div>
+        )}
+
         <ErrorNote error={check.error ?? save.error} />
 
         <Button variant="secondary" stretched loading={check.running} onClick={runCheck}>
@@ -237,6 +258,19 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
         ) : (
           <Button stretched loading={save.running} disabled={!dirty} onClick={() => runSave(false)}>
             Сохранить изменения
+          </Button>
+        )}
+        {dirty && (
+          <Button
+            variant="ghost"
+            stretched
+            onClick={() => {
+              setShifts(data.shifts);
+              setServerGaps(data.gaps);
+              setDirty(false);
+            }}
+          >
+            Отменить правки
           </Button>
         )}
         {loading && <Typography.Label variant="small">Обновляем…</Typography.Label>}
