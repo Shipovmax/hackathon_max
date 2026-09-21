@@ -89,5 +89,7 @@ class TaskTemplateDetailView(APIView):
         template = get_template(request, template_id)
         # Deactivate instead of deleting: the history of completed tasks stays intact.
         template.is_active = False
-        template.save(update_fields=["is_active"])
+        # updated_at is auto_now, and Django skips auto_now fields left out of
+        # update_fields. Without it the shift board would keep the deleted task.
+        template.save(update_fields=["is_active", "updated_at"])
         return Response(status=status.HTTP_204_NO_CONTENT)

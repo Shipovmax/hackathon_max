@@ -116,6 +116,7 @@ def _answer_with_board(client, callback_id: str, employee: Employee, now, headin
         return
     text, buttons = board.build(employee, shift, now, heading)
     client.answer_callback(callback_id, text=text, buttons=buttons)
+    board.mark_shown(shift, now)
 
 
 def _tell_the_rest(client, employee: Employee, instance: TaskInstance, now, heading: str) -> None:

@@ -22,6 +22,8 @@ class Shift(models.Model):
     # Планировщик тикает раз в 30 секунд: отметки о разовых сообщениях смены.
     start_notified_at = models.DateTimeField(null=True, blank=True)
     summary_sent_at = models.DateTimeField(null=True, blank=True)
+    # Когда сотруднику в последний раз показывали список задач смены.
+    board_sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["date", "start_time"]

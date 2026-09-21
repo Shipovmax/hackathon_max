@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 
 from apps.core.domain.lifecycle import (
     ensure_instances,
@@ -16,7 +17,9 @@ from apps.core.models import (
     ShiftStatus,
     Store,
     TaskInstance,
+    TaskKind,
     TaskStatus,
+    TaskTemplate,
 )
 
 from . import board, keyboards, notifications, texts
@@ -53,6 +56,38 @@ def send_shift_start_messages(now: datetime, client=None) -> None:
         board.send(sender, shift.employee, shift, now, texts.BOARD_SHIFT_STARTED)
         shift.start_notified_at = now
         shift.save(update_fields=["start_notified_at"])
+
+
+def refresh_changed_boards(now: datetime, client=None) -> None:
+    """
+    Владелец правил задачи точки среди дня — присылаем смене обновлённый список.
+
+    Смотрим только на задачи, попадающие в смену: правка вечерней задачи не должна
+    дёргать утреннюю смену. Снятая галочка «активна» тоже двигает `updated_at`,
+    поэтому удалённая задача уходит из списка вместе со своей кнопкой.
+    """
+    sender = client
+    for shift in Shift.objects.filter(
+        status=ShiftStatus.PUBLISHED,
+        board_sent_at__isnull=False,
+        store__is_active=True,
+        employee__status=EmployeeStatus.ACTIVE,
+        employee__account__isnull=False,
+    ).select_related("store", "employee__account", "employee__store"):
+        if not board.is_running(shift, now):
+            continue
+        changed = TaskTemplate.objects.filter(
+            Q(kind=TaskKind.DAILY) | Q(on_date=shift.date),
+            store=shift.store,
+            updated_at__gt=shift.board_sent_at,
+            planned_time__gte=shift.start_time,
+            planned_time__lte=shift.end_time,
+        ).exists()
+        if not changed:
+            continue
+        if sender is None:
+            sender = MaxClient()
+        board.send(sender, shift.employee, shift, now, texts.BOARD_UPDATED)
 
 
 def _claim_shifts(instance):
@@ -436,6 +471,7 @@ def send_shift_summaries(now: datetime, client=None) -> None:
 def tick(now: datetime) -> None:
     generate_task_instances(now)
     send_shift_start_messages(now)
+    refresh_changed_boards(now)
     send_claim_requests(now)
     send_reminders(now)
     expire_photo_waits(now)

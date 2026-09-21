@@ -9,6 +9,7 @@ from apps.bot.scheduler import (
     expire_photo_waits,
     generate_task_instances,
     mark_overdue,
+    refresh_changed_boards,
     send_claim_requests,
     send_closing_notifications,
     send_reminders,
@@ -265,6 +266,12 @@ class SendShiftStartMessagesTests(TestCase):
         )
         self.assertEqual(self.client.sent[0]["buttons"], [])
 
+    def test_shift_start_records_when_the_board_was_shown(self):
+        send_shift_start_messages(self.starts_at, client=self.client)
+
+        self.shift.refresh_from_db()
+        self.assertEqual(self.shift.board_sent_at, self.starts_at)
+
     def test_skips_draft_unbound_and_inactive_employees(self):
         cases = [
             (ShiftStatus.DRAFT, self.employee_account, EmployeeStatus.ACTIVE),
@@ -290,6 +297,122 @@ class SendShiftStartMessagesTests(TestCase):
                 self.assertEqual(self.client.sent, [])
                 self.shift.refresh_from_db()
                 self.assertIsNone(self.shift.start_notified_at)
+
+
+class RefreshChangedBoardsTests(TestCase):
+    """Владелец правит задачи точки среди дня — смена получает обновлённый список."""
+
+    def setUp(self):
+        owner = MaxAccount.objects.create(max_user_id=1)
+        network = Network.objects.create(owner=owner, name="Test network")
+        self.store = Store.objects.create(
+            network=network,
+            name="Lenina, 14",
+            open_time=time(9),
+            close_time=time(22),
+            timezone="Europe/Moscow",
+        )
+        self.employee_account = MaxAccount.objects.create(max_user_id=101)
+        self.employee = Employee.objects.create(
+            store=self.store, name="Anna", account=self.employee_account
+        )
+        self.shift = Shift.objects.create(
+            employee=self.employee,
+            store=self.store,
+            date=date(2026, 9, 21),
+            start_time=time(9),
+            end_time=time(17),
+            status=ShiftStatus.PUBLISHED,
+        )
+        self.client = RecordingClient()
+        # 12:00 по Москве: смена идёт, список сотрудник видел минуту назад.
+        self.now = datetime(2026, 9, 21, 9, tzinfo=timezone.utc)
+        self.shown_at = self.now - timedelta(minutes=1)
+        self.shift.board_sent_at = self.shown_at
+        self.shift.save(update_fields=["board_sent_at"])
+
+    def add_template(self, title, planned_time, *, changed_at=None, **kwargs):
+        template = TaskTemplate.objects.create(
+            store=self.store, title=title, planned_time=planned_time, **kwargs
+        )
+        return self.touch(template, changed_at or self.now)
+
+    def touch(self, template, at):
+        """
+        Ставит `updated_at` по часам теста.
+
+        Поле объявлено с `auto_now`, поэтому save() записал бы настоящее «сейчас»,
+        а тесты живут в выдуманном дне. `update()` идёт мимо `auto_now`.
+        """
+        TaskTemplate.objects.filter(pk=template.pk).update(updated_at=at)
+        template.refresh_from_db()
+        return template
+
+    def test_new_task_inside_the_shift_resends_the_board(self):
+        self.add_template("Count the till", time(15))
+
+        refresh_changed_boards(self.now, client=self.client)
+
+        self.assertEqual(len(self.client.sent), 1)
+        message = self.client.sent[0]
+        self.assertEqual(message["user_id"], self.employee_account.max_user_id)
+        self.assertEqual(message["text"].splitlines()[0], "Список задач изменился")
+        self.assertIn("○ 15:00 Count the till", message["text"])
+        self.assertEqual(
+            [row[0]["payload"] for row in message["buttons"]],
+            [f"done:{TaskInstance.objects.get().id}"],
+        )
+        self.shift.refresh_from_db()
+        self.assertEqual(self.shift.board_sent_at, self.now)
+
+    def test_does_not_resend_the_same_change_twice(self):
+        self.add_template("Count the till", time(15))
+
+        refresh_changed_boards(self.now, client=self.client)
+        refresh_changed_boards(self.now + timedelta(seconds=30), client=self.client)
+
+        self.assertEqual(len(self.client.sent), 1)
+
+    def test_deleted_task_also_updates_the_board(self):
+        template = self.add_template("Count the till", time(15))
+        refresh_changed_boards(self.now, client=self.client)
+        self.client.sent.clear()
+
+        deleted_at = self.now + timedelta(seconds=30)
+        template.is_active = False
+        template.save(update_fields=["is_active"])
+        self.touch(template, deleted_at)
+
+        refresh_changed_boards(self.now + timedelta(minutes=1), client=self.client)
+
+        self.assertEqual(len(self.client.sent), 1)
+        self.assertNotIn("Count the till", self.client.sent[0]["text"])
+        self.assertEqual(self.client.sent[0]["buttons"], [])
+
+    def test_task_outside_the_shift_does_not_disturb_it(self):
+        self.add_template("Closing", time(22))
+        self.add_template("Other day", time(15), kind=TaskKind.ONE_TIME, on_date=date(2026, 9, 22))
+
+        refresh_changed_boards(self.now, client=self.client)
+
+        self.assertEqual(self.client.sent, [])
+
+    def test_shift_that_never_saw_the_board_is_left_to_the_shift_start_message(self):
+        self.shift.board_sent_at = None
+        self.shift.save(update_fields=["board_sent_at"])
+        self.add_template("Count the till", time(15))
+
+        refresh_changed_boards(self.now, client=self.client)
+
+        self.assertEqual(self.client.sent, [])
+
+    def test_finished_shift_is_not_disturbed(self):
+        self.add_template("Count the till", time(15))
+        after_shift = datetime(2026, 9, 21, 15, tzinfo=timezone.utc)  # 18:00 по Москве
+
+        refresh_changed_boards(after_shift, client=self.client)
+
+        self.assertEqual(self.client.sent, [])
 
 
 @override_settings(PHOTO_WAIT_MINUTES=10)

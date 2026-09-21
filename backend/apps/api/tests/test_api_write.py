@@ -163,6 +163,26 @@ class TaskTemplateTests(OwnerApiTestCase):
         self.assertFalse(TaskTemplate.objects.get(pk=created["id"]).is_active)
         self.assertEqual(self.call("delete", f"/task-templates/{created['id']}/").status_code, 404)
 
+    def test_every_change_moves_updated_at_for_the_shift_board(self):
+        """
+        По `updated_at` планировщик рассылает смене обновлённый список задач.
+
+        Отдельная проверка нужна из-за `save(update_fields=...)`: Django не трогает
+        поля с `auto_now`, если их не перечислить, и удаление задачи прошло бы тихо.
+        """
+        created = self.call("post", self.path(), {"title": "Opening", "planned_time": "09:00"}).json()
+        template = TaskTemplate.objects.get(pk=created["id"])
+        after_create = template.updated_at
+
+        self.call("patch", f"/task-templates/{created['id']}/", {"planned_time": "09:30"})
+        template.refresh_from_db()
+        after_patch = template.updated_at
+        self.assertGreater(after_patch, after_create)
+
+        self.call("delete", f"/task-templates/{created['id']}/")
+        template.refresh_from_db()
+        self.assertGreater(template.updated_at, after_patch)
+
     def test_foreign_task_is_not_reachable(self):
         foreign = self.other_owner()
         template = TaskTemplate.objects.create(store=foreign, title="X", planned_time=dt.time(9))

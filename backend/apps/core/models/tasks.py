@@ -32,6 +32,9 @@ class TaskTemplate(models.Model):
     requires_claim = models.BooleanField(default=False)
     photo_prompt = models.CharField(max_length=200, blank=True)
     is_active = models.BooleanField(default=True)
+    # По этой отметке планировщик видит, что владелец правил задачи точки среди дня,
+    # и рассылает смене обновлённый список. Снятие галочки «активна» тоже её двигает.
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["planned_time"]

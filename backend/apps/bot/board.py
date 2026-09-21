@@ -41,29 +41,32 @@ def deadline_at(instance: TaskInstance) -> datetime:
     return planned_at(instance) + timedelta(minutes=instance.template.tolerance_minutes)
 
 
-def current_shift(employee, now: datetime) -> Shift | None:
-    """Опубликованная смена сотрудника, идущая прямо сейчас, с допуском на границах."""
-    store = employee.store
-    zone = store_zone(store)
+def is_running(shift: Shift, now: datetime) -> bool:
+    """Идёт ли смена прямо сейчас, с допуском на границах."""
+    zone = store_zone(shift.store)
     tolerance = timedelta(minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES)
-    shifts = Shift.objects.filter(
-        employee=employee,
-        store=store,
-        date=store_today(store, now),
-        status=ShiftStatus.PUBLISHED,
-    ).order_by("start_time")
-    for shift in shifts:
-        starts_at = datetime.combine(shift.date, shift.start_time, tzinfo=zone)
-        ends_at = datetime.combine(shift.date, shift.end_time, tzinfo=zone)
-        if starts_at - tolerance <= now <= ends_at + tolerance:
-            return shift
-    return None
+    starts_at = datetime.combine(shift.date, shift.start_time, tzinfo=zone)
+    ends_at = datetime.combine(shift.date, shift.end_time, tzinfo=zone)
+    return starts_at - tolerance <= now <= ends_at + tolerance
+
+
+def current_shift(employee, now: datetime) -> Shift | None:
+    """Опубликованная смена сотрудника, идущая прямо сейчас."""
+    shifts = (
+        Shift.objects.filter(
+            employee=employee,
+            store=employee.store,
+            date=store_today(employee.store, now),
+            status=ShiftStatus.PUBLISHED,
+        )
+        .select_related("store")
+        .order_by("start_time")
+    )
+    return next((shift for shift in shifts if is_running(shift, now)), None)
 
 
 def running_shifts(store: Store, day: date_type, now: datetime) -> list[Shift]:
     """Все, кто сейчас на смене в этой точке и подключён к боту."""
-    zone = store_zone(store)
-    tolerance = timedelta(minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES)
     shifts = (
         Shift.objects.filter(
             store=store,
@@ -72,16 +75,10 @@ def running_shifts(store: Store, day: date_type, now: datetime) -> list[Shift]:
             employee__status=EmployeeStatus.ACTIVE,
             employee__account__isnull=False,
         )
-        .select_related("employee__account")
+        .select_related("store", "employee__account", "employee__store")
         .order_by("start_time", "employee__name")
     )
-    running = []
-    for shift in shifts:
-        starts_at = datetime.combine(shift.date, shift.start_time, tzinfo=zone)
-        ends_at = datetime.combine(shift.date, shift.end_time, tzinfo=zone)
-        if starts_at - tolerance <= now <= ends_at + tolerance:
-            running.append(shift)
-    return running
+    return [shift for shift in shifts if is_running(shift, now)]
 
 
 @dataclass(frozen=True)
@@ -168,9 +165,21 @@ def build(employee, shift: Shift, now: datetime, heading: str) -> tuple[str, lis
     return text, keyboards.task_buttons(_button_rows(rows))
 
 
+def mark_shown(shift: Shift, now: datetime) -> None:
+    """
+    Запоминаем момент показа списка.
+
+    По нему планировщик понимает, что владелец правил задачи точки уже после того,
+    как сотрудник видел список, и что список пора прислать заново.
+    """
+    shift.board_sent_at = now
+    shift.save(update_fields=["board_sent_at"])
+
+
 def send(client, employee, shift: Shift, now: datetime, heading: str) -> None:
     text, buttons = build(employee, shift, now, heading)
     client.send_message(user_id=employee.account.max_user_id, text=text, buttons=buttons)
+    mark_shown(shift, now)
 
 
 def broadcast(client, store: Store, day: date_type, now: datetime, heading: str, skip_employee_id: int) -> None:
