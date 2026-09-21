@@ -1,8 +1,13 @@
 from datetime import datetime
 
+from apps.core.domain.lifecycle import ensure_instances, store_today
+from apps.core.models import Store
+
 
 def generate_task_instances(now: datetime) -> None:
     """Create TaskInstance rows for today from active templates."""
+    for store in Store.objects.filter(is_active=True).iterator():
+        ensure_instances(store, store_today(store, now))
 
 
 def send_shift_start_messages(now: datetime) -> None:
