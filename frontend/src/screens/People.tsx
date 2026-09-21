@@ -33,6 +33,7 @@ export function People() {
           title="Точки и сотрудники"
           subtitle={`${stores.length} точек · ${stores.reduce((sum, store) => sum + store.employees.filter((p) => p.status !== 'dismissed').length, 0)} сотрудников`}
           back
+          backTo="/"
         >
           {stores.length === 0 && (
             <div className="screen__block">
@@ -47,6 +48,7 @@ export function People() {
           {stores.map((store) => (
             <CellList
               key={store.id}
+              className="people__store"
               mode="island"
               header={
                 <CellHeader after={<span className="muted">{formatRange(store.open_time, store.close_time)}</span>}>
@@ -60,6 +62,7 @@ export function People() {
               {store.employees.map((employee) => (
                 <CellSimple
                   key={employee.id}
+                  height="compact"
                   title={employee.name}
                   subtitle={employee.status === 'invited' && employee.invite_code ? `код ${employee.invite_code}` : undefined}
                   after={<span className={`badge badge--${employee.status === 'connected' ? 'ok' : employee.status === 'invited' ? 'warn' : 'idle'}`}>{STATUS[employee.status]}</span>}
@@ -68,6 +71,7 @@ export function People() {
                 />
               ))}
               <CellSimple
+                height="compact"
                 before={<Icon name="plus" />}
                 title="Добавить сотрудника"
                 onClick={() => setNewEmployeeAt(store)}
