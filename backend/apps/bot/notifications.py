@@ -1,4 +1,4 @@
-from apps.core.domain.lifecycle import planned_at
+from apps.core.domain.lifecycle import planned_at, store_zone
 
 from . import keyboards, texts
 from .max_api.client import MaxClient
@@ -24,9 +24,22 @@ def notify_owner_overdue(instance, client=None) -> None:
     )
 
 
-def notify_owner_closed_late(instance) -> None:
+def notify_owner_closed_late(instance, client=None) -> None:
     """Closing notification, sent once when an overdue task is finally completed."""
-    raise NotImplementedError
+    store = instance.template.store
+    completion = instance.completion
+    sender = client or MaxClient()
+    sender.send_message(
+        user_id=store.network.owner.max_user_id,
+        text=texts.owner_closed_late(
+            store.name,
+            instance.template.title,
+            completion.completed_at.astimezone(store_zone(store)).strftime("%H:%M"),
+            completion.late_minutes,
+            completion.employee.name,
+        ),
+        buttons=_store_deep_link(instance),
+    )
 
 
 def notify_owner_unclaimed(instance) -> None:

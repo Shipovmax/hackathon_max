@@ -197,6 +197,40 @@ def mark_overdue(now: datetime, client=None) -> None:
             )
 
 
+def send_closing_notifications(now: datetime, client=None) -> None:
+    """Tell the owner once when a previously reported overdue task is completed."""
+    sender = client
+    candidate_ids = TaskInstance.objects.filter(
+        overdue_notified_at__isnull=False,
+        closing_notified_at__isnull=True,
+        completion__isnull=False,
+    ).values_list("id", flat=True)
+
+    for instance_id in candidate_ids:
+        with transaction.atomic():
+            instance = (
+                TaskInstance.objects.select_for_update()
+                .select_related(
+                    "template__store__network__owner",
+                    "completion__employee",
+                )
+                .filter(
+                    pk=instance_id,
+                    overdue_notified_at__isnull=False,
+                    closing_notified_at__isnull=True,
+                    completion__isnull=False,
+                )
+                .first()
+            )
+            if instance is None:
+                continue
+            if sender is None:
+                sender = MaxClient()
+            notifications.notify_owner_closed_late(instance, client=sender)
+            instance.closing_notified_at = now
+            instance.save(update_fields=["closing_notified_at"])
+
+
 def escalate_unclaimed(now: datetime) -> None:
     """Claim tasks: repeat the question CLAIM_ESCALATION_MINUTES_BEFORE minutes before, tell the owner at the deadline."""
 
@@ -211,5 +245,6 @@ def tick(now: datetime) -> None:
     send_reminders(now)
     expire_photo_waits(now)
     mark_overdue(now)
+    send_closing_notifications(now)
     escalate_unclaimed(now)
     send_shift_summaries(now)

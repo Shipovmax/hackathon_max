@@ -8,6 +8,7 @@ from apps.bot.scheduler import (
     expire_photo_waits,
     generate_task_instances,
     mark_overdue,
+    send_closing_notifications,
     send_reminders,
     send_shift_start_messages,
 )
@@ -434,6 +435,92 @@ class MarkOverdueTests(TestCase):
         self.instance.refresh_from_db()
         self.assertEqual(self.instance.status, TaskStatus.SCHEDULED)
         self.assertIsNone(self.instance.overdue_notified_at)
+
+
+class ClosingNotificationsTests(TestCase):
+    def setUp(self):
+        self.owner = MaxAccount.objects.create(max_user_id=1)
+        network = Network.objects.create(owner=self.owner, name="Test network")
+        self.store = Store.objects.create(
+            network=network,
+            name="Lenina, 14",
+            open_time=time(9),
+            close_time=time(22),
+            timezone="Europe/Moscow",
+        )
+        self.employee = Employee.objects.create(store=self.store, name="Anna")
+        template = TaskTemplate.objects.create(
+            store=self.store,
+            title="Open store",
+            planned_time=time(9),
+            tolerance_minutes=15,
+            requires_photo=False,
+        )
+        overdue_at = datetime(2026, 9, 21, 6, 16, tzinfo=timezone.utc)
+        self.instance = TaskInstance.objects.create(
+            template=template,
+            date=date(2026, 9, 21),
+            status=TaskStatus.OVERDUE,
+            overdue_notified_at=overdue_at,
+        )
+        self.completed_at = datetime(2026, 9, 21, 6, 40, tzinfo=timezone.utc)
+        self.client = RecordingClient()
+
+    def complete(self):
+        return mark_done(self.instance, self.employee, self.completed_at)
+
+    def test_notifies_owner_with_lateness_and_deep_link_once(self):
+        self.complete()
+        notified_at = self.completed_at + timedelta(minutes=1)
+
+        send_closing_notifications(notified_at, client=self.client)
+        send_closing_notifications(notified_at + timedelta(seconds=30), client=self.client)
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.closing_notified_at, notified_at)
+        self.assertEqual(len(self.client.sent), 1)
+        notification = self.client.sent[0]
+        self.assertEqual(notification["user_id"], self.owner.max_user_id)
+        self.assertEqual(
+            notification["text"],
+            (
+                "Lenina, 14: задача «Open store» выполнена в 09:40, "
+                "с опозданием на 40 минут. Отметил: Anna"
+            ),
+        )
+        self.assertTrue(
+            notification["buttons"][0][0]["url"].endswith(
+                f"?startapp=store_{self.store.id}_20260921"
+            )
+        )
+
+    def test_does_not_notify_without_completion_or_original_overdue_alert(self):
+        send_closing_notifications(self.completed_at, client=self.client)
+        self.assertEqual(self.client.sent, [])
+
+        self.complete()
+        self.instance.overdue_notified_at = None
+        self.instance.save(update_fields=["overdue_notified_at"])
+        send_closing_notifications(self.completed_at, client=self.client)
+        self.assertEqual(self.client.sent, [])
+
+    def test_failed_notification_is_retried_on_a_later_tick(self):
+        self.complete()
+        self.client.error = RuntimeError("MAX unavailable")
+
+        with self.assertRaisesRegex(RuntimeError, "MAX unavailable"):
+            send_closing_notifications(self.completed_at, client=self.client)
+
+        self.instance.refresh_from_db()
+        self.assertIsNone(self.instance.closing_notified_at)
+        self.client.error = None
+        send_closing_notifications(
+            self.completed_at + timedelta(minutes=1),
+            client=self.client,
+        )
+        self.instance.refresh_from_db()
+        self.assertIsNotNone(self.instance.closing_notified_at)
+        self.assertEqual(len(self.client.sent), 1)
 
 
 @override_settings(REMINDER_MINUTES_BEFORE=5)
