@@ -52,12 +52,36 @@ export interface StoreDay {
   tasks: DayTask[];
 }
 
+export interface ShiftInput {
+  employee_id: number;
+  date: string;
+  start: string;
+  end: string;
+}
+
+export interface Gap {
+  date: string;
+  start: string;
+  end: string;
+}
+
 export interface Schedule {
   week_start: string;
   status: 'draft' | 'published';
+  open_time: string;
+  close_time: string;
   employees: { id: number; name: string }[];
-  shifts: { employee_id: number; date: string; start: string; end: string }[];
-  gaps: { date: string; start: string; end: string }[];
+  shifts: ShiftInput[];
+  gaps: Gap[];
+}
+
+export interface ScheduleDraft {
+  week_start: string;
+  shifts: ShiftInput[];
+}
+
+export interface Coverage {
+  gaps: Gap[];
 }
 
 export interface TaskTemplateItem {
@@ -71,15 +95,26 @@ export interface TaskTemplateItem {
   requires_claim: boolean;
 }
 
+export type TaskTemplateInput = Omit<TaskTemplateItem, 'id'>;
+
 export interface Person {
   id: number;
   name: string;
   status: 'connected' | 'invited' | 'dismissed';
+  invite_code: string | null;
 }
 
 export interface StoreWithPeople {
   id: number;
   name: string;
   address: string;
+  open_time: string;
+  close_time: string;
   employees: Person[];
+}
+
+export type StoreInput = Pick<StoreWithPeople, 'name' | 'address' | 'open_time' | 'close_time'>;
+
+export interface EmployeeInput {
+  name: string;
 }
