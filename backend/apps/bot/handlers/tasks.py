@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 
+import httpx
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -141,17 +142,30 @@ def on_done(client, account, callback_id: str, instance_id: int) -> None:
             ):
                 response = texts.ask_photo(instance.template.photo_prompt)
             elif instance.template.requires_photo:
-                instance.status = TaskStatus.AWAITING_PHOTO
-                instance.awaiting_photo_employee = employee
-                instance.awaiting_photo_since = now
-                instance.save(
-                    update_fields=[
-                        "status",
-                        "awaiting_photo_employee",
-                        "awaiting_photo_since",
-                    ]
+                pending = (
+                    TaskInstance.objects.filter(
+                        status=TaskStatus.AWAITING_PHOTO,
+                        awaiting_photo_employee=employee,
+                    )
+                    .exclude(pk=instance.pk)
+                    .select_related("template")
+                    .order_by("awaiting_photo_since")
+                    .first()
                 )
-                response = texts.ask_photo(instance.template.photo_prompt)
+                if pending:
+                    response = texts.finish_pending_photo(pending.template.title)
+                else:
+                    instance.status = TaskStatus.AWAITING_PHOTO
+                    instance.awaiting_photo_employee = employee
+                    instance.awaiting_photo_since = now
+                    instance.save(
+                        update_fields=[
+                            "status",
+                            "awaiting_photo_employee",
+                            "awaiting_photo_since",
+                        ]
+                    )
+                    response = texts.ask_photo(instance.template.photo_prompt)
             else:
                 completion = mark_done(instance, employee, now)
                 response = texts.marked(
@@ -165,7 +179,77 @@ def on_done(client, account, callback_id: str, instance_id: int) -> None:
 
 def on_photo(client, account, message: dict) -> None:
     """Photo for the task the employee is awaiting; attachment has a CDN URL."""
-    raise NotImplementedError
+    employee = (
+        Employee.objects.filter(account=account, status=EmployeeStatus.ACTIVE)
+        .select_related("store")
+        .first()
+    )
+    if employee is None:
+        client.send_message(user_id=account.max_user_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
+        return
+
+    pending = (
+        TaskInstance.objects.filter(
+            status=TaskStatus.AWAITING_PHOTO,
+            awaiting_photo_employee=employee,
+        )
+        .select_related("template__store")
+        .order_by("-awaiting_photo_since")
+        .first()
+    )
+    if pending is None:
+        client.send_message(user_id=account.max_user_id, text=texts.PHOTO_NOT_EXPECTED)
+        return
+
+    attachments = (message.get("body") or {}).get("attachments") or []
+    image = next((item for item in attachments if item.get("type") == "image"), None)
+    payload = (image or {}).get("payload") or {}
+    url = payload.get("url")
+    if not url:
+        client.send_message(user_id=account.max_user_id, text=texts.PHOTO_FAILED)
+        return
+
+    try:
+        photo = client.download_file(url)
+    except (httpx.HTTPError, ValueError):
+        client.send_message(user_id=account.max_user_id, text=texts.PHOTO_FAILED)
+        return
+    if not photo:
+        client.send_message(user_id=account.max_user_id, text=texts.PHOTO_FAILED)
+        return
+
+    now = timezone.now()
+    with transaction.atomic():
+        instance = (
+            TaskInstance.objects.select_for_update()
+            .select_related("template__store", "completion")
+            .filter(
+                pk=pending.pk,
+                status=TaskStatus.AWAITING_PHOTO,
+                awaiting_photo_employee=employee,
+            )
+            .first()
+        )
+        if instance is None:
+            response = texts.PHOTO_NOT_EXPECTED
+        else:
+            reserved_at = instance.awaiting_photo_since or now
+            decision = check_can_mark(employee, instance, reserved_at)
+            shift_end = decision.shift_end or instance.template.store.close_time
+            completion = mark_done(
+                instance,
+                employee,
+                now,
+                photo=photo,
+                photo_token=payload.get("token") or "",
+            )
+            response = texts.marked(
+                instance.template.title,
+                _time(completion.completed_at.astimezone(store_zone(instance.template.store))),
+                _next_task_time(instance, employee, now, shift_end),
+            )
+
+    client.send_message(user_id=account.max_user_id, text=response)
 
 
 def on_claim(client, account, callback_id: str, instance_id: int) -> None:

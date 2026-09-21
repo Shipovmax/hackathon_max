@@ -5,6 +5,7 @@ from django.test.utils import override_settings
 
 from apps.bot import texts
 from apps.bot.scheduler import (
+    expire_photo_waits,
     generate_task_instances,
     send_reminders,
     send_shift_start_messages,
@@ -270,6 +271,61 @@ class SendShiftStartMessagesTests(TestCase):
                 self.assertEqual(self.client.sent, [])
                 self.shift.refresh_from_db()
                 self.assertIsNone(self.shift.start_notified_at)
+
+
+@override_settings(PHOTO_WAIT_MINUTES=10)
+class ExpirePhotoWaitsTests(TestCase):
+    def setUp(self):
+        owner = MaxAccount.objects.create(max_user_id=1)
+        network = Network.objects.create(owner=owner, name="Test network")
+        store = Store.objects.create(
+            network=network,
+            name="Lenina, 14",
+            open_time=time(9),
+            close_time=time(22),
+        )
+        employee = Employee.objects.create(store=store, name="Anna")
+        template = TaskTemplate.objects.create(
+            store=store,
+            title="Opening store",
+            planned_time=time(9),
+        )
+        self.requested_at = datetime(2026, 9, 21, 6, tzinfo=timezone.utc)
+        self.instance = TaskInstance.objects.create(
+            template=template,
+            date=date(2026, 9, 21),
+            status=TaskStatus.AWAITING_PHOTO,
+            reminder_sent_at=self.requested_at - timedelta(minutes=5),
+            awaiting_photo_employee=employee,
+            awaiting_photo_since=self.requested_at,
+        )
+
+    def test_restores_reminded_status_and_clears_photo_reservation_at_timeout(self):
+        expire_photo_waits(self.requested_at + timedelta(minutes=10))
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.REMINDED)
+        self.assertIsNone(self.instance.awaiting_photo_employee)
+        self.assertIsNone(self.instance.awaiting_photo_since)
+
+    def test_restores_scheduled_status_when_there_was_no_reminder(self):
+        self.instance.reminder_sent_at = None
+        self.instance.save(update_fields=["reminder_sent_at"])
+
+        expire_photo_waits(self.requested_at + timedelta(minutes=10))
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.SCHEDULED)
+
+    def test_does_not_expire_before_timeout_and_repeated_calls_are_safe(self):
+        expire_photo_waits(self.requested_at + timedelta(minutes=10, seconds=-1))
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.AWAITING_PHOTO)
+
+        expire_photo_waits(self.requested_at + timedelta(minutes=10))
+        expire_photo_waits(self.requested_at + timedelta(minutes=11))
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.REMINDED)
 
 
 @override_settings(REMINDER_MINUTES_BEFORE=5)

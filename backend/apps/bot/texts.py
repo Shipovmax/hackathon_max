@@ -27,6 +27,7 @@ WELCOME_BACK_OWNER = "Вы владелец. Сводка по точкам — 
 WELCOME_BACK_EMPLOYEE = "Вы подключены. Напишите «что осталось», чтобы увидеть задачи на смену."
 UNKNOWN = "Не понял. Для смены роли отправьте /role."
 PHOTO_FAILED = "Не получилось загрузить фото. Задача осталась открытой — попробуйте ещё раз."
+PHOTO_NOT_EXPECTED = "Сейчас нет задачи, ожидающей фото. Напишите «что осталось»."
 NOT_IMPLEMENTED = "Эта часть бота ещё в разработке."
 
 
@@ -55,6 +56,10 @@ def marked(task_title: str, at: str, next_at: str | None = None) -> str:
 
 def awaiting_photo_by(task_title: str, employee_name: str) -> str:
     return f"Задача «{task_title}» уже ожидает фото от {employee_name}."
+
+
+def finish_pending_photo(task_title: str) -> str:
+    return f"Сначала пришлите фото для задачи «{task_title}»."
 
 
 def claim_question(at: str, task_title: str) -> str:

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from django.conf import settings
+from django.db import transaction
 
 from apps.core.domain.lifecycle import ensure_instances, planned_at, store_today, store_zone
 from apps.core.models import (
@@ -109,6 +110,41 @@ def send_reminders(now: datetime, client=None) -> None:
         instance.save(update_fields=["reminder_sent_at", "status"])
 
 
+def expire_photo_waits(now: datetime) -> None:
+    """Release tasks whose employee did not send a photo within the configured timeout."""
+    cutoff = now - timedelta(minutes=settings.PHOTO_WAIT_MINUTES)
+    expired_ids = TaskInstance.objects.filter(
+        status=TaskStatus.AWAITING_PHOTO,
+        awaiting_photo_since__lte=cutoff,
+    ).values_list("id", flat=True)
+
+    for instance_id in expired_ids:
+        with transaction.atomic():
+            instance = (
+                TaskInstance.objects.select_for_update()
+                .filter(
+                    pk=instance_id,
+                    status=TaskStatus.AWAITING_PHOTO,
+                    awaiting_photo_since__lte=cutoff,
+                )
+                .first()
+            )
+            if instance is None:
+                continue
+            instance.status = (
+                TaskStatus.REMINDED if instance.reminder_sent_at else TaskStatus.SCHEDULED
+            )
+            instance.awaiting_photo_employee = None
+            instance.awaiting_photo_since = None
+            instance.save(
+                update_fields=[
+                    "status",
+                    "awaiting_photo_employee",
+                    "awaiting_photo_since",
+                ]
+            )
+
+
 def mark_overdue(now: datetime) -> None:
     """Move tasks past planned time + tolerance to overdue and notify the owner once."""
 
@@ -125,6 +161,7 @@ def tick(now: datetime) -> None:
     generate_task_instances(now)
     send_shift_start_messages(now)
     send_reminders(now)
+    expire_photo_waits(now)
     mark_overdue(now)
     escalate_unclaimed(now)
     send_shift_summaries(now)
