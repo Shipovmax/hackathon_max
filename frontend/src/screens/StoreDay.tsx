@@ -1,6 +1,6 @@
 import { CellList, CellSimple, Typography } from '@maxhub/max-ui';
-import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { useApi } from '../api/hooks';
 import type { DayTask, StoreDay as StoreDayData } from '../api/types';
@@ -27,7 +27,13 @@ function subtitle(task: DayTask): string {
 export function StoreDay() {
   const { storeId } = useParams();
   const navigate = useNavigate();
-  const [date, setDate] = useState(today());
+  // Дата живёт в адресе: диплинк из уведомления открывает нужный день сразу.
+  const [params, setParams] = useSearchParams();
+  const date = params.get('date') ?? today();
+  const setDate = useCallback(
+    (next: string) => setParams(next === today() ? {} : { date: next }, { replace: true }),
+    [setParams],
+  );
   const [photo, setPhoto] = useState<DayTask | null>(null);
   const state = useApi<StoreDayData>(`/stores/${storeId}/day/?date=${date}`);
 

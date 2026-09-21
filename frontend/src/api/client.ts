@@ -37,3 +37,20 @@ export const apiPost = <T>(path: string, body?: unknown) => request<T>('POST', p
 export const apiPut = <T>(path: string, body: unknown) => request<T>('PUT', path, body);
 export const apiPatch = <T>(path: string, body: unknown) => request<T>('PATCH', path, body);
 export const apiDelete = <T>(path: string) => request<T>('DELETE', path);
+
+/**
+ * Фото отметки отдаёт наш бэкенд и проверяет подпись запуска, а тег <img>
+ * заголовки не шлёт. Поэтому скачиваем сами и показываем из памяти.
+ */
+export async function apiBlobUrl(path: string): Promise<string> {
+  if (USE_MOCKS) return mockRequest<string>('GET', path);
+
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, { headers: { 'X-Max-Init-Data': getInitData() } });
+  } catch {
+    throw new ApiError(0, 'network', 'нет связи с сервером');
+  }
+  if (!response.ok) throw new ApiError(response.status, '', response.statusText);
+  return URL.createObjectURL(await response.blob());
+}

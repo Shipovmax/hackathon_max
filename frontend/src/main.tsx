@@ -7,7 +7,16 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 
 import { App } from './App';
-import { getPlatform, watchColorScheme } from './max/bridge';
+import { getPlatform, startRoute, watchColorScheme } from './max/bridge';
+
+// Диплинк из уведомления подставляем в адрес до старта роутера, чтобы «Назад»
+// вёл на сводку, а не наружу из приложения.
+const deepLink = startRoute();
+if (deepLink && window.location.pathname === '/') {
+  // Сводка остаётся в истории, поэтому «Назад» из карточки ведёт на неё, а не
+  // закрывает приложение.
+  window.history.pushState(null, '', deepLink);
+}
 
 function Root() {
   const [colorScheme, setColorScheme] = useState<'light' | 'dark'>(

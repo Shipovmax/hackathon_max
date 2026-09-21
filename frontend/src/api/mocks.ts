@@ -323,6 +323,7 @@ type Handler = (params: string[], query: URLSearchParams, body: unknown) => unkn
 
 const routes: [string, RegExp, Handler][] = [
   ['GET', /^\/me\/$/, () => me],
+  ['GET', /^\/completions\/(\d+)\/photo\/$/, () => DEMO_PHOTO],
   ['GET', /^\/dashboard\/$/, (_p, query) => dashboard(query.get('date') ?? TODAY)],
   ['GET', /^\/stores\/$/, () => db.stores],
   ['POST', /^\/stores\/$/, (_p, _q, body) => {

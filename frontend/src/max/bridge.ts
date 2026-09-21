@@ -23,6 +23,18 @@ declare global {
 }
 
 export const getInitData = (): string => window.WebApp?.initData ?? '';
+
+/**
+ * Диплинк из уведомления владельцу: https://max.ru/<ник>?startapp=store_3 или
+ * store_3_20260921 — открываем сразу карточку точки за нужный день.
+ */
+export function startRoute(): string | null {
+  const payload = window.WebApp?.initDataUnsafe?.start_param ?? '';
+  const match = /^store_(\d+)(?:_(\d{4})(\d{2})(\d{2}))?$/.exec(payload);
+  if (!match) return null;
+  const [, storeId, year, month, day] = match;
+  return year ? `/stores/${storeId}?date=${year}-${month}-${day}` : `/stores/${storeId}`;
+}
 export const getPlatform = (): WebAppPlatform => window.WebApp?.platform ?? 'web';
 export const isInsideMax = (): boolean => Boolean(window.WebApp?.initData);
 
