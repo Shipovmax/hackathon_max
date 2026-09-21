@@ -92,6 +92,16 @@ class DoneCallbackTests(TestCase):
             status=ShiftStatus.PUBLISHED,
         )
 
+    def answer_text(self):
+        return self.client.answers[-1][1]
+
+    def answer_heading(self):
+        """Первая строка ответа — что именно произошло; ниже идёт доска смены."""
+        return self.answer_text().splitlines()[0]
+
+    def answer_payloads(self):
+        return [row[0]["payload"] for row in (self.client.answer_buttons[-1][1] or [])]
+
     def call(self, instance_id=None, now=NOW):
         with mock.patch("apps.bot.handlers.tasks.timezone.now", return_value=now):
             on_done(
@@ -101,14 +111,14 @@ class DoneCallbackTests(TestCase):
                 instance_id or self.instance.id,
             )
 
-    def test_marks_task_and_shows_next_unfinished_task_in_current_shift(self):
+    def test_marks_task_and_answers_with_the_updated_board(self):
         next_template = TaskTemplate.objects.create(
             store=self.store,
             title="Prepare sales floor",
             planned_time=time(11),
             requires_photo=False,
         )
-        TaskInstance.objects.create(template=next_template, date=DAY)
+        next_instance = TaskInstance.objects.create(template=next_template, date=DAY)
 
         self.call()
 
@@ -116,9 +126,48 @@ class DoneCallbackTests(TestCase):
         self.assertEqual(self.instance.status, TaskStatus.DONE_ON_TIME)
         self.assertEqual(self.instance.completion.employee, self.employee)
         self.assertEqual(self.instance.completion.completed_at, NOW)
+        self.assertEqual(self.answer_heading(), "Готово: «Open store» отмечено в 10:03, вовремя")
+        self.assertIn("Выполнено 1 из 2 задач", self.answer_text())
+        self.assertIn("✓ 10:00 Open store — Anna в 10:03, вовремя", self.answer_text())
+        self.assertIn("○ 11:00 Prepare sales floor — отметить до 11:15", self.answer_text())
+        # Кнопка остаётся только у незакрытой задачи.
+        self.assertEqual(self.answer_payloads(), [f"done:{next_instance.id}"])
+
+    def test_others_on_shift_receive_the_updated_board(self):
+        """Один отметил — у всех на смене список обновляется, чтобы не делать дважды."""
+        igor_account = MaxAccount.objects.create(max_user_id=102)
+        igor = Employee.objects.create(store=self.store, name="Igor", account=igor_account)
+        self.make_shift(igor, time(9), time(17))
+        off_today = MaxAccount.objects.create(max_user_id=103)
+        Employee.objects.create(store=self.store, name="Dasha", account=off_today)
+
+        self.call()
+
+        # Выходному сотруднику ничего не уходит, нажавшему список приходит ответом.
+        self.assertEqual([call["user_id"] for call in self.client.sent], [igor_account.max_user_id])
+        message = self.client.sent[0]
+        self.assertEqual(message["text"].splitlines()[0], "«Open store» отмечено: Anna, 10:03")
+        self.assertIn("✓ 10:00 Open store — Anna в 10:03, вовремя", message["text"])
+        self.assertEqual(message["buttons"], [])
+
+    def test_marked_within_tolerance_is_not_called_late(self):
+        """late_minutes считается от планового времени, но допуск задачи — 15 минут."""
+        self.call(now=NOW + timedelta(minutes=5))
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.DONE_ON_TIME)
+        self.assertEqual(self.instance.completion.late_minutes, 8)
+        self.assertEqual(self.answer_heading(), "Готово: «Open store» отмечено в 10:08, вовремя")
+        self.assertNotIn("опозданием", self.answer_text())
+
+    def test_marked_past_tolerance_reports_the_delay(self):
+        self.call(now=NOW + timedelta(minutes=30))
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.DONE_LATE)
         self.assertEqual(
-            self.client.answers,
-            [("callback-1", "Open store отмечено в 10:03. Следующая задача — в 11:00")],
+            self.answer_heading(),
+            "Готово: «Open store» отмечено в 10:33, с опозданием на 33 минуты",
         )
 
     def test_reserves_task_and_requests_photo(self):
@@ -133,10 +182,12 @@ class DoneCallbackTests(TestCase):
         self.assertEqual(self.instance.awaiting_photo_employee, self.employee)
         self.assertEqual(self.instance.awaiting_photo_since, NOW)
         self.assertFalse(hasattr(self.instance, "completion"))
-        self.assertEqual(
-            self.client.answers,
-            [("callback-1", "Пришлите фото торгового зала")],
-        )
+        text = self.answer_text()
+        self.assertIn("Задача «Open store», плановое время 10:00.", text)
+        self.assertIn("Пришлите фото торгового зала", text)
+        self.assertIn("задача принимается до 10:15", text)
+        # Ждём одно действие, поэтому список кнопок сейчас не показываем.
+        self.assertEqual(self.answer_payloads(), [])
 
     def test_repeated_photo_request_keeps_the_same_employee(self):
         self.template.requires_photo = True
@@ -169,10 +220,8 @@ class DoneCallbackTests(TestCase):
 
         self.instance.refresh_from_db()
         self.assertEqual(self.instance.awaiting_photo_employee, other)
-        self.assertEqual(
-            self.client.answers,
-            [("callback-1", "Задача «Open store» уже ожидает фото от Igor.")],
-        )
+        self.assertEqual(self.answer_heading(), "Задача «Open store» уже ожидает фото от Igor.")
+        self.assertIn("… 10:00 Open store — ждём фото от Igor", self.answer_text())
 
     def test_does_not_open_a_second_photo_request_for_the_same_employee(self):
         self.template.requires_photo = True
@@ -192,8 +241,7 @@ class DoneCallbackTests(TestCase):
         self.assertEqual(second.status, TaskStatus.SCHEDULED)
         self.assertIsNone(second.awaiting_photo_employee)
         self.assertEqual(
-            self.client.answers[-1],
-            ("callback-1", "Сначала пришлите фото для задачи «Open store»."),
+            self.answer_heading(), "Сначала пришлите фото для задачи «Open store»."
         )
 
     def test_day_off_names_the_next_shift(self):
@@ -247,10 +295,7 @@ class DoneCallbackTests(TestCase):
 
         self.call()
 
-        self.assertEqual(
-            self.client.answers,
-            [("callback-1", "Open store отметил Igor в 10:01.")],
-        )
+        self.assertEqual(self.answer_heading(), "Open store уже отмечено: Igor, 10:01.")
 
     def test_unbound_account_is_asked_for_invite_code(self):
         account = MaxAccount.objects.create(max_user_id=999)
@@ -266,7 +311,7 @@ class DoneCallbackTests(TestCase):
     def test_unknown_task_is_answered_without_error(self):
         self.call(instance_id=999)
 
-        self.assertEqual(self.client.answers, [("callback-1", texts.UNKNOWN)])
+        self.assertEqual(self.answer_heading(), texts.UNKNOWN)
 
     def photo_message(self, *, url="https://i.oneme.ru/photo", token="photo-token"):
         return {
@@ -307,10 +352,15 @@ class DoneCallbackTests(TestCase):
         with completion.photo.open("rb") as photo_file:
             self.assertEqual(photo_file.read(), b"test-image-bytes")
         self.assertEqual(self.client.downloaded_urls, ["https://i.oneme.ru/photo"])
+        self.assertEqual(len(self.client.sent), 1)
+        message = self.client.sent[0]
+        self.assertEqual(message["user_id"], self.account.max_user_id)
         self.assertEqual(
-            self.client.sent,
-            [{"user_id": self.account.max_user_id, "text": "Open store отмечено в 10:04"}],
+            message["text"].splitlines()[0],
+            "Фото принято, «Open store» отмечено в 10:04, вовремя",
         )
+        self.assertIn("✓ 10:00 Open store — Anna в 10:04, вовремя", message["text"])
+        self.assertEqual(message["buttons"], [])
 
     def test_download_failure_keeps_task_waiting_for_another_photo(self):
         self.reserve_photo()
@@ -431,21 +481,23 @@ class StatusHandlerTests(TestCase):
 
         self.call()
 
+        self.assertEqual(len(self.client.sent), 1)
+        message = self.client.sent[0]
+        self.assertEqual(message["user_id"], self.account.max_user_id)
         self.assertEqual(
-            self.client.sent,
-            [
-                {
-                    "user_id": self.account.max_user_id,
-                    "text": (
-                        "Задачи смены. Lenina, 14 · до 17:00\n\n"
-                        "✓ 09:00 Cleaning\n"
-                        "… 09:30 Photo report — ожидается фото\n"
-                        "○ 10:00 Open store\n"
-                        "○ 11:00 Prepare sales floor"
-                    ),
-                }
-            ],
+            message["text"],
+            "Задачи смены\n"
+            "Lenina, 14 · смена 09:00–17:00\n"
+            "Выполнено 1 из 4 задач\n\n"
+            "✓ 09:00 Cleaning — Anna в 09:01, вовремя\n"
+            "… 09:30 Photo report — ждём фото от Anna\n"
+            "○ 10:00 Open store — отметить до 10:15\n"
+            "○ 11:00 Prepare sales floor — отметить до 11:15\n\n"
+            "Отметьте задачу кнопкой под сообщением.",
         )
+        # Задача после смены в список не попадает, кнопки — у каждой незакрытой.
+        self.assertNotIn("After shift", message["text"])
+        self.assertEqual(len(message["buttons"]), 3)
 
     def test_hides_claim_task_taken_by_another_employee(self):
         other = Employee.objects.create(store=self.store, name="Igor")
@@ -502,7 +554,7 @@ class StatusHandlerTests(TestCase):
 
         self.call(now=before_start)
 
-        self.assertIn("Задачи смены.", self.client.sent[0]["text"])
+        self.assertIn("Задачи смены", self.client.sent[0]["text"])
 
     def test_active_shift_without_tasks_has_a_clear_message(self):
         self.template.is_active = False
@@ -512,8 +564,9 @@ class StatusHandlerTests(TestCase):
 
         self.assertEqual(
             self.client.sent[0]["text"],
-            "Задачи смены. Lenina, 14 · до 17:00\n\nЗадач на эту смену нет.",
+            "Задачи смены\nLenina, 14 · смена 09:00–17:00\nЗадач на эту смену нет",
         )
+        self.assertEqual(self.client.sent[0]["buttons"], [])
 
     def test_unbound_account_is_asked_for_invite_code(self):
         unbound = MaxAccount.objects.create(max_user_id=999)
@@ -578,21 +631,19 @@ class ClaimHandlerTests(TestCase):
         claim = Claim.objects.get(instance=self.instance)
         self.assertEqual(claim.employee, self.anna)
         self.assertEqual(
-            self.client.answers,
-            [("claim-callback", texts.claim_confirmed())],
+            self.client.answers[-1][1].splitlines()[0],
+            "Задача «Delivery» в 14:00 теперь за вами",
         )
+        # Взятая задача сразу получает кнопку «Выполнено».
         self.assertEqual(
-            self.client.answer_buttons[0][1][0][0]["payload"],
-            f"done:{self.instance.id}",
+            [row[0]["payload"] for row in self.client.answer_buttons[-1][1]],
+            [f"done:{self.instance.id}"],
         )
+        self.assertEqual(len(self.client.sent), 1)
+        self.assertEqual(self.client.sent[0]["user_id"], self.igor_account.max_user_id)
         self.assertEqual(
-            self.client.sent,
-            [
-                {
-                    "user_id": self.igor_account.max_user_id,
-                    "text": "Delivery в 14:00 выполняет Anna.",
-                }
-            ],
+            self.client.sent[0]["text"].splitlines()[0],
+            "Delivery в 14:00 выполняет Anna.",
         )
 
     def test_second_employee_sees_who_already_claimed_task(self):
@@ -605,10 +656,11 @@ class ClaimHandlerTests(TestCase):
 
         self.assertEqual(Claim.objects.filter(instance=self.instance).count(), 1)
         self.assertEqual(
-            self.client.answers,
-            [("second", "Delivery в 14:00 выполняет Anna.")],
+            self.client.answers[-1][1].splitlines()[0],
+            "Delivery в 14:00 выполняет Anna.",
         )
-        self.assertEqual(self.client.answer_buttons, [("second", None)])
+        # Чужую взятую задачу Игорю не показываем, кнопок по ней тоже нет.
+        self.assertEqual(self.client.answer_buttons[-1][1], [])
         self.assertEqual(self.client.sent, [])
 
     def test_employee_without_shift_covering_task_cannot_claim(self):
@@ -623,16 +675,24 @@ class ClaimHandlerTests(TestCase):
         )
 
     def test_claim_task_can_only_be_completed_by_the_winner(self):
+        def heading(callback_id):
+            """Первая строка ответа: доска смены идёт под ней."""
+            return next(
+                text.splitlines()[0]
+                for answer_id, text in self.client.answers
+                if answer_id == callback_id
+            )
+
         with mock.patch("apps.bot.handlers.tasks.timezone.now", return_value=NOW):
             on_done(self.client, self.anna_account, "before-claim", self.instance.id)
-        self.assertEqual(self.client.answers[-1], ("before-claim", texts.CLAIM_REQUIRED))
+        self.assertEqual(heading("before-claim"), texts.CLAIM_REQUIRED)
 
         self.claim(self.anna_account)
         with mock.patch("apps.bot.handlers.tasks.timezone.now", return_value=NOW):
             on_done(self.client, self.igor_account, "wrong", self.instance.id)
             on_done(self.client, self.anna_account, "winner", self.instance.id)
 
-        self.assertIn(("wrong", "Delivery в 14:00 выполняет Anna."), self.client.answers)
-        self.assertIn(("winner", "Delivery отмечено в 10:03"), self.client.answers)
+        self.assertEqual(heading("wrong"), "Delivery в 14:00 выполняет Anna.")
+        self.assertEqual(heading("winner"), "Готово: «Delivery» отмечено в 10:03, вовремя")
         self.instance.refresh_from_db()
         self.assertEqual(self.instance.completion.employee, self.anna)

@@ -19,7 +19,7 @@ from apps.core.models import (
     TaskStatus,
 )
 
-from . import keyboards, notifications, texts
+from . import board, keyboards, notifications, texts
 from .max_api.client import MaxClient
 
 
@@ -38,7 +38,7 @@ def send_shift_start_messages(now: datetime, client=None) -> None:
         store__is_active=True,
         employee__status=EmployeeStatus.ACTIVE,
         employee__account__isnull=False,
-    ).select_related("store", "employee__account")
+    ).select_related("store", "employee__account", "employee__store")
 
     for shift in shifts:
         zone = store_zone(shift.store)
@@ -47,24 +47,10 @@ def send_shift_start_messages(now: datetime, client=None) -> None:
         if not starts_at <= now < ends_at:
             continue
 
-        instances = ensure_instances(shift.store, shift.date)
-        task_rows = [
-            (instance.template.planned_time.strftime("%H:%M"), instance.template.title)
-            for instance in sorted(
-                instances,
-                key=lambda item: item.template.planned_time,
-            )
-        ]
         if sender is None:
             sender = MaxClient()
-        sender.send_message(
-            user_id=shift.employee.account.max_user_id,
-            text=texts.shift_started(
-                shift.store.name,
-                shift.end_time.strftime("%H:%M"),
-                task_rows,
-            ),
-        )
+        # Доска смены: список задач и кнопка у каждой, отмечать можно прямо отсюда.
+        board.send(sender, shift.employee, shift, now, texts.BOARD_SHIFT_STARTED)
         shift.start_notified_at = now
         shift.save(update_fields=["start_notified_at"])
 
@@ -129,20 +115,30 @@ def send_claim_requests(now: datetime, client=None) -> None:
 
 
 def send_reminders(now: datetime, client=None) -> None:
-    """Reminder with the «Выполнено» button REMINDER_MINUTES_BEFORE minutes before the planned time."""
-    lead_time = timedelta(minutes=settings.REMINDER_MINUTES_BEFORE)
+    """
+    Два напоминания перед сроком задачи: за REMINDER_FIRST и REMINDER_FINAL минут.
+
+    Срок — плановое время плюс допуск задачи, то есть момент, когда она станет просроченной
+    и о ней узнает владелец. Поэтому оба напоминания говорят, сколько осталось до него.
+    """
+    first_lead = timedelta(minutes=settings.REMINDER_FIRST_MINUTES_BEFORE)
+    final_lead = timedelta(minutes=settings.REMINDER_FINAL_MINUTES_BEFORE)
     sender = client
     instances = TaskInstance.objects.filter(
-        reminder_sent_at__isnull=True,
-        status=TaskStatus.SCHEDULED,
+        final_reminder_sent_at__isnull=True,
+        completion__isnull=True,
+        status__in=(TaskStatus.SCHEDULED, TaskStatus.REMINDED),
         template__is_active=True,
         template__requires_claim=False,
         template__store__is_active=True,
     ).select_related("template__store")
 
     for instance in instances:
-        planned = planned_at(instance)
-        if not planned - lead_time <= now < planned:
+        deadline = planned_at(instance) + timedelta(minutes=instance.template.tolerance_minutes)
+        if now >= deadline:
+            continue
+        final = now >= deadline - final_lead
+        if not final and (now < deadline - first_lead or instance.reminder_sent_at is not None):
             continue
 
         recipient_ids = list(
@@ -164,16 +160,29 @@ def send_reminders(now: datetime, client=None) -> None:
 
         if sender is None:
             sender = MaxClient()
+        minutes_left = max(1, int((deadline - now).total_seconds() // 60))
         for user_id in recipient_ids:
             sender.send_message(
                 user_id=user_id,
-                text=texts.reminder(settings.REMINDER_MINUTES_BEFORE, instance.template.title),
+                text=texts.reminder(
+                    instance.template.title,
+                    instance.template.planned_time.strftime("%H:%M"),
+                    deadline.strftime("%H:%M"),
+                    minutes_left,
+                    final,
+                ),
                 buttons=keyboards.done_button(instance.id),
             )
 
-        instance.reminder_sent_at = now
+        # На последнем напоминании закрываем и первое: если бот лежал в его окно,
+        # посылать «осталось 15 минут» задним числом уже незачем.
+        instance.reminder_sent_at = instance.reminder_sent_at or now
         instance.status = TaskStatus.REMINDED
-        instance.save(update_fields=["reminder_sent_at", "status"])
+        fields = ["reminder_sent_at", "status"]
+        if final:
+            instance.final_reminder_sent_at = now
+            fields.append("final_reminder_sent_at")
+        instance.save(update_fields=fields)
 
 
 def expire_photo_waits(now: datetime) -> None:

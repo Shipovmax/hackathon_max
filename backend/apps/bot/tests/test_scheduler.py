@@ -191,18 +191,26 @@ class SendShiftStartMessagesTests(TestCase):
 
         send_shift_start_messages(self.starts_at, client=self.client)
 
+        self.assertEqual(len(self.client.sent), 1)
+        message = self.client.sent[0]
+        self.assertEqual(message["user_id"], self.employee_account.max_user_id)
         self.assertEqual(
-            self.client.sent,
+            message["text"],
+            "Смена началась\n"
+            "Lenina, 14 · смена 09:00–17:00\n"
+            "Выполнено 0 из 3 задач\n\n"
+            "○ 09:00 Open store — отметить до 09:15, нужно фото\n"
+            "○ 10:00 Prepare sales floor — отметить до 10:15, нужно фото\n"
+            "○ 14:00 Delivery — отметить до 14:15, нужно фото\n\n"
+            "Отметьте задачу кнопкой под сообщением.",
+        )
+        # Кнопка на каждую задачу, подпись называет её целиком.
+        self.assertEqual(
+            [row[0]["text"] for row in message["buttons"]],
             [
-                {
-                    "user_id": self.employee_account.max_user_id,
-                    "text": (
-                        "Смена началась. Lenina, 14 · до 17:00\n\n"
-                        "09:00 Open store\n"
-                        "10:00 Prepare sales floor\n"
-                        "14:00 Delivery"
-                    ),
-                }
+                "Выполнено · 09:00 Open store",
+                "Выполнено · 10:00 Prepare sales floor",
+                "Выполнено · 14:00 Delivery",
             ],
         )
         self.shift.refresh_from_db()
@@ -253,8 +261,9 @@ class SendShiftStartMessagesTests(TestCase):
 
         self.assertEqual(
             self.client.sent[0]["text"],
-            "Смена началась. Lenina, 14 · до 17:00",
+            "Смена началась\nLenina, 14 · смена 09:00–17:00\nЗадач на эту смену нет",
         )
+        self.assertEqual(self.client.sent[0]["buttons"], [])
 
     def test_skips_draft_unbound_and_inactive_employees(self):
         cases = [
@@ -489,7 +498,7 @@ class ClosingNotificationsTests(TestCase):
             notification["text"],
             (
                 "Lenina, 14: задача «Open store» выполнена в 09:40, "
-                "с опозданием на 40 минут. Отметил: Anna"
+                "с опозданием на 40 минут. Кто отметил: Anna"
             ),
         )
         self.assertTrue(
@@ -822,8 +831,15 @@ class ClaimSchedulerTests(TestCase):
         self.assertIsNone(self.instance.overdue_notified_at)
 
 
-@override_settings(REMINDER_MINUTES_BEFORE=5)
+@override_settings(REMINDER_FIRST_MINUTES_BEFORE=15, REMINDER_FINAL_MINUTES_BEFORE=5)
 class SendRemindersTests(TestCase):
+    """
+    Напоминания отсчитываются от срока задачи, то есть от планового времени плюс допуск.
+
+    Задача стоит на 12:00 с допуском 15 минут, значит срок — 12:15 по Москве (09:15 UTC),
+    первое напоминание в 12:00, последнее в 12:10.
+    """
+
     def setUp(self):
         owner = MaxAccount.objects.create(max_user_id=1)
         network = Network.objects.create(owner=owner, name="Test network")
@@ -858,26 +874,69 @@ class SendRemindersTests(TestCase):
             status=ShiftStatus.PUBLISHED,
         )
         self.client = RecordingClient()
-        self.due_at = datetime(2026, 9, 21, 8, 55, tzinfo=timezone.utc)
+        self.deadline = datetime(2026, 9, 21, 9, 15, tzinfo=timezone.utc)
+        self.first_at = self.deadline - timedelta(minutes=15)
+        self.final_at = self.deadline - timedelta(minutes=5)
+        self.due_at = self.first_at
 
-    def test_sends_due_reminder_with_done_button_and_marks_instance(self):
-        send_reminders(self.due_at, client=self.client)
+    def test_sends_first_reminder_with_done_button_and_marks_instance(self):
+        send_reminders(self.first_at, client=self.client)
 
         self.assertEqual(len(self.client.sent), 1)
         self.assertEqual(self.client.sent[0]["user_id"], self.employee_account.max_user_id)
-        self.assertEqual(self.client.sent[0]["text"], texts.reminder(5, self.template.title))
+        self.assertEqual(
+            self.client.sent[0]["text"],
+            "Напоминание: «Opening store», плановое время 12:00.\n"
+            "Осталось 15 минут: после 12:15 задача станет просроченной "
+            "и о ней узнает владелец.",
+        )
         self.assertEqual(
             self.client.sent[0]["buttons"][0][0]["payload"], f"done:{self.instance.id}"
         )
         self.instance.refresh_from_db()
-        self.assertEqual(self.instance.reminder_sent_at, self.due_at)
+        self.assertEqual(self.instance.reminder_sent_at, self.first_at)
+        self.assertIsNone(self.instance.final_reminder_sent_at)
         self.assertEqual(self.instance.status, TaskStatus.REMINDED)
 
-    def test_does_not_send_the_same_reminder_twice(self):
-        send_reminders(self.due_at, client=self.client)
-        send_reminders(self.due_at, client=self.client)
+    def test_sends_final_reminder_closer_to_the_deadline(self):
+        send_reminders(self.first_at, client=self.client)
+        send_reminders(self.final_at, client=self.client)
+
+        self.assertEqual(len(self.client.sent), 2)
+        self.assertEqual(
+            self.client.sent[1]["text"],
+            "Последнее напоминание: «Opening store», плановое время 12:00.\n"
+            "Осталось 5 минут: после 12:15 задача станет просроченной "
+            "и о ней узнает владелец.",
+        )
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.reminder_sent_at, self.first_at)
+        self.assertEqual(self.instance.final_reminder_sent_at, self.final_at)
+
+    def test_final_reminder_closes_the_first_one_when_the_bot_was_down(self):
+        """Слать «осталось 15 минут» задним числом уже незачем."""
+        send_reminders(self.final_at, client=self.client)
+        send_reminders(self.final_at + timedelta(minutes=1), client=self.client)
 
         self.assertEqual(len(self.client.sent), 1)
+        self.assertTrue(self.client.sent[0]["text"].startswith("Последнее напоминание"))
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.reminder_sent_at, self.final_at)
+        self.assertEqual(self.instance.final_reminder_sent_at, self.final_at)
+
+    def test_does_not_send_the_same_reminder_twice(self):
+        send_reminders(self.first_at, client=self.client)
+        send_reminders(self.first_at, client=self.client)
+
+        self.assertEqual(len(self.client.sent), 1)
+
+    def test_completed_task_is_not_reminded_about(self):
+        mark_done(self.instance, self.employee, self.first_at - timedelta(minutes=1))
+
+        send_reminders(self.first_at, client=self.client)
+        send_reminders(self.final_at, client=self.client)
+
+        self.assertEqual(self.client.sent, [])
 
     def test_sends_to_each_distinct_employee_whose_published_shift_covers_task(self):
         second_account = MaxAccount.objects.create(max_user_id=102)
@@ -934,8 +993,12 @@ class SendRemindersTests(TestCase):
         self.assertIsNone(self.instance.reminder_sent_at)
         self.assertEqual(self.instance.status, TaskStatus.SCHEDULED)
 
-    def test_only_sends_during_the_reminder_window(self):
-        send_reminders(self.due_at - timedelta(seconds=1), client=self.client)
-        send_reminders(self.due_at + timedelta(minutes=5), client=self.client)
-
+    def test_does_not_send_before_the_window_or_after_the_deadline(self):
+        send_reminders(self.first_at - timedelta(seconds=1), client=self.client)
         self.assertEqual(self.client.sent, [])
+
+        send_reminders(self.deadline, client=self.client)
+        self.assertEqual(self.client.sent, [])
+        self.instance.refresh_from_db()
+        self.assertIsNone(self.instance.reminder_sent_at)
+        self.assertIsNone(self.instance.final_reminder_sent_at)

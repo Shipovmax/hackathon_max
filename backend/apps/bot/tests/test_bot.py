@@ -27,8 +27,31 @@ class TextsTests(SimpleTestCase):
         self.assertEqual(texts.minutes(22), "22 минуты")
         self.assertEqual(texts.minutes(11), "11 минут")
 
-    def test_reminder_matches_agreed_wording(self):
-        self.assertEqual(texts.reminder(5, "Открытие магазина"), "Через 5 минут — открытие магазина")
+    def test_tasks_word_uses_the_genitive_after_a_count(self):
+        self.assertEqual(texts.tasks_word(1), "задачи")
+        self.assertEqual(texts.tasks_word(3), "задач")
+        self.assertEqual(texts.tasks_word(11), "задач")
+
+    def test_reminder_names_the_task_and_the_deadline(self):
+        self.assertEqual(
+            texts.reminder("Открытие магазина", "09:00", "09:15", 15, False),
+            "Напоминание: «Открытие магазина», плановое время 09:00.\n"
+            "Осталось 15 минут: после 09:15 задача станет просроченной "
+            "и о ней узнает владелец.",
+        )
+
+    def test_final_reminder_is_marked_as_the_last_one(self):
+        self.assertTrue(
+            texts.reminder("Открытие магазина", "09:00", "09:15", 5, True).startswith(
+                "Последнее напоминание"
+            )
+        )
+
+    def test_photo_request_names_the_task(self):
+        text = texts.ask_photo_for("Открытие магазина", "09:00", "09:15", 10)
+        self.assertIn("Задача «Открытие магазина», плановое время 09:00.", text)
+        self.assertIn("задача принимается до 09:15", text)
+        self.assertIn("не придёт за 10 минут", text)
 
     def test_parse_callback(self):
         self.assertEqual(keyboards.parse_callback("done:42"), ("done", "42"))

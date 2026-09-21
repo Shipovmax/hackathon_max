@@ -55,7 +55,10 @@ class TaskInstance(models.Model):
     status = models.CharField(
         max_length=16, choices=TaskStatus.choices, default=TaskStatus.SCHEDULED
     )
+    # Два напоминания перед сроком: первое за REMINDER_FIRST_MINUTES_BEFORE, последнее за
+    # REMINDER_FINAL_MINUTES_BEFORE. Отметки нужны, чтобы тик планировщика не слал их повторно.
     reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    final_reminder_sent_at = models.DateTimeField(null=True, blank=True)
     escalation_sent_at = models.DateTimeField(null=True, blank=True)
     overdue_notified_at = models.DateTimeField(null=True, blank=True)
     closing_notified_at = models.DateTimeField(null=True, blank=True)

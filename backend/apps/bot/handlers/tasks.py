@@ -1,18 +1,12 @@
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import httpx
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
-from apps.core.domain.lifecycle import (
-    ensure_instances,
-    evaluate_status,
-    mark_done,
-    store_today,
-    store_zone,
-)
+from apps.core.domain.lifecycle import mark_done, store_today, store_zone
 from apps.core.domain.permissions import MarkDenial, check_can_mark
 from apps.core.models import (
     Claim,
@@ -24,11 +18,19 @@ from apps.core.models import (
     TaskStatus,
 )
 
-from .. import keyboards, texts
+from .. import board, texts
 
 
 def _time(value) -> str:
     return value.strftime("%H:%M")
+
+
+def _employee(account) -> Employee | None:
+    return (
+        Employee.objects.filter(account=account, status=EmployeeStatus.ACTIVE)
+        .select_related("store")
+        .first()
+    )
 
 
 def _next_shift_label(employee: Employee, now) -> str | None:
@@ -87,40 +89,60 @@ def _denial_text(employee: Employee, instance: TaskInstance, decision, now) -> s
     return texts.UNKNOWN
 
 
-def _next_task_time(instance: TaskInstance, employee: Employee, now, shift_end) -> str | None:
-    local_time = now.astimezone(store_zone(instance.template.store)).time().replace(tzinfo=None)
-    next_instance = (
-        TaskInstance.objects.filter(
-            template__store=instance.template.store,
-            template__is_active=True,
-            date=instance.date,
-            template__planned_time__gt=local_time,
-            template__planned_time__lte=shift_end,
-            completion__isnull=True,
-        )
-        .filter(Q(template__requires_claim=False) | Q(claim__employee=employee))
-        .select_related("template")
-        .order_by("template__planned_time")
-        .first()
-    )
-    return _time(next_instance.template.planned_time) if next_instance else None
+def _late(instance: TaskInstance, completion) -> int:
+    """Опоздание показываем, только если оно вышло за допуск задачи."""
+    return completion.late_minutes if instance.status == TaskStatus.DONE_LATE else 0
 
 
-def on_done(client, account, callback_id: str, instance_id: int) -> None:
-    """Check the employee's shift and either reserve a photo or record completion."""
-    employee = (
-        Employee.objects.filter(account=account, status=EmployeeStatus.ACTIVE)
-        .select_related("store")
-        .first()
+def _photo_request(instance: TaskInstance) -> str:
+    """Просьба о фото называет задачу и срок: кнопок в смене несколько, они похожи."""
+    return texts.ask_photo_for(
+        instance.template.title,
+        _time(instance.template.planned_time),
+        _time(board.deadline_at(instance)),
+        settings.PHOTO_WAIT_MINUTES,
+        instance.template.photo_prompt,
     )
-    if employee is None:
-        client.answer_callback(callback_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
+
+
+def _answer_with_board(client, callback_id: str, employee: Employee, now, heading: str) -> None:
+    """
+    Ответ на нажатие заменяет сообщение с кнопкой, поэтому кладём туда всю доску:
+    сотрудник сразу видит обновлённый список, а не состояние до нажатия.
+    """
+    shift = board.current_shift(employee, now)
+    if shift is None:
+        client.answer_callback(callback_id, text=heading)
         return
+    text, buttons = board.build(employee, shift, now, heading)
+    client.answer_callback(callback_id, text=text, buttons=buttons)
 
-    now = timezone.now()
+
+def _tell_the_rest(client, employee: Employee, instance: TaskInstance, now, heading: str) -> None:
+    """Остальным на смене — обновлённый список, чтобы никто не делал работу дважды."""
+    board.broadcast(
+        client,
+        instance.template.store,
+        instance.date,
+        now,
+        heading,
+        skip_employee_id=employee.id,
+    )
+
+
+@dataclass
+class _Outcome:
+    """Чем закончилось нажатие «Выполнено»: отказ, просьба о фото или готовая отметка."""
+
+    kind: str  # refused | photo | done
+    text: str = ""
+    instance: TaskInstance | None = None
+    done_at: str = ""
+    late_minutes: int = 0
+
+
+def _mark_or_refuse(employee: Employee, instance_id: int, now) -> _Outcome:
     with transaction.atomic():
-        # PostgreSQL refuses FOR UPDATE over the nullable side of an outer join, and
-        # select_related on completion/claim produces exactly that: lock only the row.
         instance = (
             TaskInstance.objects.select_for_update(of=("self",))
             .select_related(
@@ -133,83 +155,99 @@ def on_done(client, account, callback_id: str, instance_id: int) -> None:
             .first()
         )
         if instance is None:
-            response = texts.UNKNOWN
-        else:
-            response = None
-            claim = getattr(instance, "claim", None)
-            if instance.template.requires_claim and claim is None:
-                response = texts.CLAIM_REQUIRED
-            elif (
-                instance.template.requires_claim
-                and claim is not None
-                and claim.employee_id != employee.id
-            ):
-                response = texts.claim_taken_by(
-                    instance.template.title,
-                    _time(instance.template.planned_time),
-                    claim.employee.name,
-                )
-            else:
-                decision = check_can_mark(employee, instance, now)
-            if response is None and not decision.allowed:
-                response = _denial_text(employee, instance, decision, now)
-            elif response is None and (
-                instance.status == TaskStatus.AWAITING_PHOTO
-                and instance.awaiting_photo_employee_id
-                and instance.awaiting_photo_employee_id != employee.id
-            ):
-                response = texts.awaiting_photo_by(
-                    instance.template.title,
-                    instance.awaiting_photo_employee.name,
-                )
-            elif response is None and (
-                instance.status == TaskStatus.AWAITING_PHOTO
-                and instance.awaiting_photo_employee_id == employee.id
-            ):
-                response = texts.ask_photo(instance.template.photo_prompt)
-            elif response is None and instance.template.requires_photo:
-                pending = (
-                    TaskInstance.objects.filter(
-                        status=TaskStatus.AWAITING_PHOTO,
-                        awaiting_photo_employee=employee,
-                    )
-                    .exclude(pk=instance.pk)
-                    .select_related("template")
-                    .order_by("awaiting_photo_since")
-                    .first()
-                )
-                if pending:
-                    response = texts.finish_pending_photo(pending.template.title)
-                else:
-                    instance.status = TaskStatus.AWAITING_PHOTO
-                    instance.awaiting_photo_employee = employee
-                    instance.awaiting_photo_since = now
-                    instance.save(
-                        update_fields=[
-                            "status",
-                            "awaiting_photo_employee",
-                            "awaiting_photo_since",
-                        ]
-                    )
-                    response = texts.ask_photo(instance.template.photo_prompt)
-            elif response is None:
-                completion = mark_done(instance, employee, now)
-                response = texts.marked(
-                    instance.template.title,
-                    _time(completion.completed_at.astimezone(store_zone(instance.template.store))),
-                    _next_task_time(instance, employee, now, decision.shift_end),
-                )
+            return _Outcome("refused", texts.UNKNOWN)
 
-    client.answer_callback(callback_id, text=response)
+        template = instance.template
+        claim = getattr(instance, "claim", None)
+        if template.requires_claim and claim is None:
+            return _Outcome("refused", texts.CLAIM_REQUIRED)
+        if template.requires_claim and claim.employee_id != employee.id:
+            return _Outcome(
+                "refused",
+                texts.claim_taken_by(template.title, _time(template.planned_time), claim.employee.name),
+            )
+
+        decision = check_can_mark(employee, instance, now)
+        if not decision.allowed:
+            return _Outcome("refused", _denial_text(employee, instance, decision, now))
+
+        if instance.status == TaskStatus.AWAITING_PHOTO and instance.awaiting_photo_employee_id:
+            if instance.awaiting_photo_employee_id != employee.id:
+                return _Outcome(
+                    "refused",
+                    texts.awaiting_photo_by(template.title, instance.awaiting_photo_employee.name),
+                )
+            return _Outcome("photo", _photo_request(instance), instance=instance)
+
+        if template.requires_photo:
+            # Одно ожидание фото на сотрудника: иначе непонятно, к какой задаче снимок.
+            pending = (
+                TaskInstance.objects.filter(
+                    status=TaskStatus.AWAITING_PHOTO,
+                    awaiting_photo_employee=employee,
+                )
+                .exclude(pk=instance.pk)
+                .select_related("template")
+                .order_by("awaiting_photo_since")
+                .first()
+            )
+            if pending:
+                return _Outcome("refused", texts.finish_pending_photo(pending.template.title))
+            instance.status = TaskStatus.AWAITING_PHOTO
+            instance.awaiting_photo_employee = employee
+            instance.awaiting_photo_since = now
+            instance.save(
+                update_fields=["status", "awaiting_photo_employee", "awaiting_photo_since"]
+            )
+            return _Outcome("photo", _photo_request(instance), instance=instance)
+
+        completion = mark_done(instance, employee, now)
+        return _Outcome(
+            "done",
+            instance=instance,
+            done_at=_time(completion.completed_at.astimezone(store_zone(template.store))),
+            late_minutes=_late(instance, completion),
+        )
+
+
+def on_done(client, account, callback_id: str, instance_id: int) -> None:
+    """Кнопка «Выполнено»: проверяет смену и либо просит фото, либо закрывает задачу."""
+    employee = _employee(account)
+    if employee is None:
+        client.answer_callback(callback_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
+        return
+
+    now = timezone.now()
+    result = _mark_or_refuse(employee, instance_id, now)
+
+    if result.kind == "photo":
+        # Ждём одно конкретное действие, поэтому список с кнопками сейчас только мешает.
+        client.answer_callback(callback_id, text=result.text)
+        return
+    if result.kind == "refused":
+        _answer_with_board(client, callback_id, employee, now, result.text)
+        return
+
+    instance = result.instance
+    _answer_with_board(
+        client,
+        callback_id,
+        employee,
+        now,
+        texts.done_heading(instance.template.title, result.done_at, result.late_minutes),
+    )
+    _tell_the_rest(
+        client,
+        employee,
+        instance,
+        now,
+        texts.done_by_other_heading(instance.template.title, employee.name, result.done_at),
+    )
 
 
 def on_photo(client, account, message: dict) -> None:
-    """Photo for the task the employee is awaiting; attachment has a CDN URL."""
-    employee = (
-        Employee.objects.filter(account=account, status=EmployeeStatus.ACTIVE)
-        .select_related("store")
-        .first()
-    )
+    """Фото для задачи, которую сотрудник взял на отметку; вложение несёт ссылку на CDN."""
+    employee = _employee(account)
     if employee is None:
         client.send_message(user_id=account.max_user_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
         return
@@ -245,6 +283,7 @@ def on_photo(client, account, message: dict) -> None:
         return
 
     now = timezone.now()
+    heading = None
     with transaction.atomic():
         instance = (
             TaskInstance.objects.select_for_update(of=("self",))
@@ -256,12 +295,7 @@ def on_photo(client, account, message: dict) -> None:
             )
             .first()
         )
-        if instance is None:
-            response = texts.PHOTO_NOT_EXPECTED
-        else:
-            reserved_at = instance.awaiting_photo_since or now
-            decision = check_can_mark(employee, instance, reserved_at)
-            shift_end = decision.shift_end or instance.template.store.close_time
+        if instance is not None:
             completion = mark_done(
                 instance,
                 employee,
@@ -269,29 +303,38 @@ def on_photo(client, account, message: dict) -> None:
                 photo=photo,
                 photo_token=payload.get("token") or "",
             )
-            response = texts.marked(
-                instance.template.title,
-                _time(completion.completed_at.astimezone(store_zone(instance.template.store))),
-                _next_task_time(instance, employee, now, shift_end),
+            done_at = _time(completion.completed_at.astimezone(store_zone(instance.template.store)))
+            heading = texts.photo_accepted_heading(
+                instance.template.title, done_at, _late(instance, completion)
             )
 
-    client.send_message(user_id=account.max_user_id, text=response)
+    if heading is None:
+        client.send_message(user_id=account.max_user_id, text=texts.PHOTO_NOT_EXPECTED)
+        return
+
+    shift = board.current_shift(employee, now)
+    if shift is None:
+        client.send_message(user_id=account.max_user_id, text=heading)
+    else:
+        board.send(client, employee, shift, now, heading)
+    _tell_the_rest(
+        client,
+        employee,
+        instance,
+        now,
+        texts.done_by_other_heading(instance.template.title, employee.name, done_at),
+    )
 
 
 def on_claim(client, account, callback_id: str, instance_id: int) -> None:
-    """Button «Беру»: the first press wins, the rest of the shift is told who took it."""
-    employee = (
-        Employee.objects.filter(account=account, status=EmployeeStatus.ACTIVE)
-        .select_related("store")
-        .first()
-    )
+    """Кнопка «Беру»: первое нажатие побеждает, остальным на смене говорим, кто взял."""
+    employee = _employee(account)
     if employee is None:
         client.answer_callback(callback_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
         return
 
     now = timezone.now()
-    notify_user_ids = []
-    buttons = None
+    taken = False
     with transaction.atomic():
         instance = (
             TaskInstance.objects.select_for_update(of=("self",))
@@ -311,8 +354,9 @@ def on_claim(client, account, callback_id: str, instance_id: int) -> None:
             claim = getattr(instance, "claim", None)
             if claim is not None:
                 if claim.employee_id == employee.id:
-                    response = texts.claim_confirmed()
-                    buttons = keyboards.done_button(instance.id)
+                    response = texts.claimed_heading(
+                        instance.template.title, _time(instance.template.planned_time)
+                    )
                 else:
                     response = texts.claim_taken_by(
                         instance.template.title,
@@ -332,42 +376,29 @@ def on_claim(client, account, callback_id: str, instance_id: int) -> None:
                     response = texts.CLAIM_NOT_AVAILABLE
                 else:
                     Claim.objects.create(instance=instance, employee=employee)
-                    response = texts.claim_confirmed()
-                    buttons = keyboards.done_button(instance.id)
-                    notify_user_ids = list(
-                        Shift.objects.filter(
-                            store=instance.template.store,
-                            date=instance.date,
-                            status=ShiftStatus.PUBLISHED,
-                            start_time__lte=instance.template.planned_time,
-                            end_time__gte=instance.template.planned_time,
-                            employee__status=EmployeeStatus.ACTIVE,
-                            employee__account__isnull=False,
-                        )
-                        .exclude(employee=employee)
-                        .order_by()
-                        .values_list("employee__account__max_user_id", flat=True)
-                        .distinct()
+                    response = texts.claimed_heading(
+                        instance.template.title, _time(instance.template.planned_time)
                     )
+                    taken = True
 
-    client.answer_callback(callback_id, text=response, buttons=buttons)
-    if notify_user_ids:
-        notification = texts.claim_taken_by(
-            instance.template.title,
-            _time(instance.template.planned_time),
-            employee.name,
+    _answer_with_board(client, callback_id, employee, now, response)
+    if taken:
+        _tell_the_rest(
+            client,
+            employee,
+            instance,
+            now,
+            texts.claim_taken_by(
+                instance.template.title,
+                _time(instance.template.planned_time),
+                employee.name,
+            ),
         )
-        for user_id in notify_user_ids:
-            client.send_message(user_id=user_id, text=notification)
 
 
 def on_status(client, account) -> None:
-    """«Что осталось»: tasks of the current shift, or a shift-state stub."""
-    employee = (
-        Employee.objects.filter(account=account, status=EmployeeStatus.ACTIVE)
-        .select_related("store")
-        .first()
-    )
+    """«Что осталось»: доска текущей смены или заглушка про состояние смены."""
+    employee = _employee(account)
     if employee is None:
         client.send_message(user_id=account.max_user_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
         return
@@ -391,11 +422,8 @@ def on_status(client, account) -> None:
         ends_at = datetime.combine(shift.date, shift.end_time, tzinfo=zone)
         return starts_at - tolerance, ends_at + tolerance
 
-    current_shift = next(
-        (shift for shift in shifts if bounds(shift)[0] <= now <= bounds(shift)[1]),
-        None,
-    )
-    if current_shift is None:
+    current = next((shift for shift in shifts if bounds(shift)[0] <= now <= bounds(shift)[1]), None)
+    if current is None:
         upcoming = [shift for shift in shifts if now < bounds(shift)[0]]
         if upcoming:
             response = texts.status_not_started(_time(upcoming[0].start_time))
@@ -406,31 +434,4 @@ def on_status(client, account) -> None:
         client.send_message(user_id=account.max_user_id, text=response)
         return
 
-    task_rows = []
-    for instance in ensure_instances(store, day):
-        planned_time = instance.template.planned_time
-        if not current_shift.start_time <= planned_time <= current_shift.end_time:
-            continue
-        claim = getattr(instance, "claim", None)
-        if (
-            instance.template.requires_claim
-            and claim is not None
-            and claim.employee_id != employee.id
-        ):
-            continue
-        task_rows.append(
-            (
-                _time(planned_time),
-                instance.template.title,
-                evaluate_status(instance, now),
-            )
-        )
-
-    client.send_message(
-        user_id=account.max_user_id,
-        text=texts.shift_status(
-            store.name,
-            _time(current_shift.end_time),
-            task_rows,
-        ),
-    )
+    board.send(client, employee, current, now, texts.BOARD_STATUS)
