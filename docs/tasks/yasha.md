@@ -39,6 +39,8 @@ cd ~/hackathon_max && docker compose stop bot
   задачи на момент `now`, `planned_at(instance)` — плановое время с часовым поясом точки.
 - `apps.core.domain.lifecycle.ensure_instances(store, date)` создаёт задачи дня по шаблонам и
   безопасна при повторном вызове — используй её в Y2.
+- В `Shift` есть `start_notified_at` и `summary_sent_at` (оба `null`) — отметки о разовых
+  сообщениях смены для Y3 и Y10.
 
 ### Y1. Разобраться с ботом на живых данных
 
