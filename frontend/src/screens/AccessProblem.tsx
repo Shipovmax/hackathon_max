@@ -11,8 +11,10 @@ interface AccessProblemProps {
 
 /** Тупика быть не должно: всегда видно, что случилось и что делать дальше. */
 export function AccessProblem({ error, onRetry, notOwner }: AccessProblemProps) {
+  // describeError уже говорит, что делать, поэтому подсказку добавляем только там,
+  // где повтор не поможет.
   let message = error ? describeError(error) : 'Не удалось загрузить данные.';
-  let hint = 'Попробуйте ещё раз.';
+  let hint = '';
   let retry = true;
 
   if (notOwner || (error instanceof ApiError && error.status === 403)) {
@@ -30,7 +32,7 @@ export function AccessProblem({ error, onRetry, notOwner }: AccessProblemProps) 
   return (
     <div className="center">
       <Typography.Title variant="small-strong">{message}</Typography.Title>
-      <Typography.Body variant="medium">{hint}</Typography.Body>
+      {hint && <Typography.Body variant="medium">{hint}</Typography.Body>}
       {retry && <Button onClick={onRetry}>Повторить</Button>}
     </div>
   );
