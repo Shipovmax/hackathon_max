@@ -6,6 +6,8 @@ import { apiPost, apiPut } from '../api/client';
 import { useAction, useApi } from '../api/hooks';
 import type { Coverage, Gap, Schedule as ScheduleData, ShiftInput } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
+import { Empty } from '../components/Empty';
+import { Icon } from '../components/Icon';
 import { ErrorNote } from '../components/ErrorNote';
 import { Screen } from '../components/Screen';
 import { Sheet } from '../components/Sheet';
@@ -164,7 +166,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
             disabled={dirty}
             onClick={() => onWeek(addDays(week, -7))}
           >
-            ‹
+            <Icon name="back" />
           </IconButton>
           <Typography.Body variant="medium-strong">{formatWeekRange(data.week_start)}</Typography.Body>
           <IconButton
@@ -174,7 +176,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
             disabled={dirty}
             onClick={() => onWeek(addDays(week, 7))}
           >
-            ›
+            <Icon name="forward" />
           </IconButton>
         </div>
 
@@ -184,11 +186,11 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
         </Typography.Label>
 
         {data.employees.length === 0 ? (
-          <div className="alert">
-            <Typography.Body variant="medium">
-              На точке нет сотрудников. Добавьте их на экране «Точки и сотрудники».
-            </Typography.Body>
-          </div>
+          <Empty
+            icon="people"
+            title="На точке нет сотрудников"
+            text="Пока некому ставить смены. Добавьте людей на экране «Точки и сотрудники»."
+          />
         ) : (
           <div className="schedule__scroll">
             <table className="schedule">
@@ -228,6 +230,10 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
               </tbody>
             </table>
           </div>
+        )}
+
+        {data.employees.length > 0 && (
+          <CoverageStrip days={days} gaps={gaps} openTime={data.open_time} closeTime={data.close_time} />
         )}
 
         {gaps.length > 0 ? (
@@ -291,6 +297,47 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
 
       <ShiftEditor state={editor} onClose={() => setEditor(null)} onApply={applyEditor} onClear={clearEditor} />
     </Screen>
+  );
+}
+
+interface CoverageStripProps {
+  days: { label: string; date: string }[];
+  gaps: Gap[];
+  openTime: string;
+  closeTime: string;
+}
+
+/**
+ * Полоса покрытия: каждый день рабочего дня показан целиком, красные куски —
+ * это часы, на которые никто не поставлен. Список окон словами остаётся ниже,
+ * но дыру в неделе видно раньше, чем её читают.
+ */
+function CoverageStrip({ days, gaps, openTime, closeTime }: CoverageStripProps) {
+  const open = minutesOf(openTime);
+  const span = minutesOf(closeTime) - open;
+
+  return (
+    <div className="coverage">
+      {days.map((day) => (
+        <div className="coverage__day" key={day.date}>
+          <span className="coverage__label">{day.label}</span>
+          <span className="coverage__bar">
+            {gaps
+              .filter((gap) => gap.date === day.date)
+              .map((gap) => (
+                <span
+                  key={gap.start}
+                  className="coverage__gap"
+                  style={{
+                    left: `${((minutesOf(gap.start) - open) / span) * 100}%`,
+                    width: `${((minutesOf(gap.end) - minutesOf(gap.start)) / span) * 100}%`,
+                  }}
+                />
+              ))}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 

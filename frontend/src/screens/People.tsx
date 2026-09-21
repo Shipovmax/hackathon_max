@@ -5,6 +5,8 @@ import { apiPost } from '../api/client';
 import { useAction, useApi } from '../api/hooks';
 import type { Person, StoreInput, StoreWithPeople } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
+import { Empty } from '../components/Empty';
+import { Icon } from '../components/Icon';
 import { ErrorNote } from '../components/ErrorNote';
 import { TextField } from '../components/Field';
 import { Screen } from '../components/Screen';
@@ -32,6 +34,16 @@ export function People() {
           subtitle={`${stores.length} точек · ${stores.reduce((sum, store) => sum + store.employees.filter((p) => p.status !== 'dismissed').length, 0)} сотрудников`}
           back
         >
+          {stores.length === 0 && (
+            <div className="screen__block">
+              <Empty
+                icon="store"
+                title="Магазинов пока нет"
+                text="Начните с точки: название, адрес и часы работы. Потом добавьте людей и выдайте им коды."
+              />
+            </div>
+          )}
+
           {stores.map((store) => (
             <CellList
               key={store.id}
@@ -42,7 +54,9 @@ export function People() {
                 </CellHeader>
               }
             >
-              {store.employees.length === 0 && <CellSimple title="Сотрудников пока нет" />}
+              {store.employees.length === 0 && (
+                <CellSimple title="Сотрудников пока нет" subtitle="Бот не сможет вести смену без людей" />
+              )}
               {store.employees.map((employee) => (
                 <CellSimple
                   key={employee.id}
@@ -53,7 +67,11 @@ export function People() {
                   onClick={() => setPerson({ store, person: employee })}
                 />
               ))}
-              <CellSimple title="Добавить сотрудника" showChevron onClick={() => setNewEmployeeAt(store)} />
+              <CellSimple
+                before={<Icon name="plus" />}
+                title="Добавить сотрудника"
+                onClick={() => setNewEmployeeAt(store)}
+              />
             </CellList>
           ))}
 
@@ -170,6 +188,14 @@ function PersonCard({
   const { person } = data;
   const shownCode = code ?? person.invite_code;
 
+  // Код владелец передаёт человеку в переписке, поэтому копирование важнее вида.
+  const copy = (value: string) => {
+    navigator.clipboard?.writeText(value).then(
+      () => toast.show('Код скопирован'),
+      () => toast.show('Не удалось скопировать, введите код вручную', 'bad'),
+    );
+  };
+
   const runInvite = async () => {
     const result = await invite.run(() => apiPost<Person>(`/employees/${person.id}/invite/`));
     if (!result) return;
@@ -195,10 +221,12 @@ function PersonCard({
       </Typography.Body>
 
       {shownCode && person.status !== 'dismissed' && (
-        <div className="code">
-          <Typography.Title variant="small-strong">{shownCode}</Typography.Title>
-          <Typography.Label variant="small">код одноразовый</Typography.Label>
-        </div>
+        <button type="button" className="code" onClick={() => copy(shownCode)}>
+          <span className="code__value">{shownCode}</span>
+          <span className="code__hint">
+            <Icon name="copy" size={14} /> код одноразовый, нажмите чтобы скопировать
+          </span>
+        </button>
       )}
 
       <ErrorNote error={invite.error ?? dismiss.error} />

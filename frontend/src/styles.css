@@ -141,6 +141,37 @@ body {
   background: var(--bad);
 }
 
+/* Пустой экран ----------------------------------------------------------- */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 20px;
+  border-radius: var(--radius);
+  text-align: center;
+  background: var(--background-card, #fff);
+  box-shadow: inset 0 0 0 1px var(--background-tertiary, rgba(138, 143, 152, 0.16));
+}
+
+.empty__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 2px;
+  border-radius: 50%;
+  color: var(--accent);
+  background: rgba(45, 126, 246, 0.12);
+}
+
+.icon {
+  display: block;
+  flex: none;
+}
+
 /* Статусы ---------------------------------------------------------------- */
 
 .badge {
@@ -247,6 +278,34 @@ body {
   display: none;
 }
 
+/* Черта «сейчас» в хронологии дня. */
+.nowline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 16px 2px 12px;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.nowline__time {
+  width: 46px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.nowline__rule {
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.4;
+}
+
+.nowline__label {
+  text-transform: lowercase;
+  opacity: 0.8;
+}
+
 .datenav {
   display: flex;
   align-items: center;
@@ -340,6 +399,41 @@ body {
   box-shadow: inset 0 0 0 1px rgba(45, 126, 246, 0.5);
 }
 
+/* Полоса покрытия недели. */
+.coverage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.coverage__day {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.coverage__label {
+  width: 24px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.coverage__bar {
+  position: relative;
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(31, 157, 76, 0.35);
+}
+
+.coverage__gap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--bad);
+}
+
 /* Формы ------------------------------------------------------------------ */
 
 .field {
@@ -382,12 +476,35 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 14px;
+  gap: 6px;
+  width: 100%;
+  padding: 16px;
+  border: 0;
   border-radius: var(--radius);
-  letter-spacing: 4px;
+  font: inherit;
   color: var(--accent);
   background: rgba(45, 126, 246, 0.12);
+  cursor: pointer;
+  transition: transform 140ms var(--ease);
+}
+
+.code:active {
+  transform: scale(0.98);
+}
+
+.code__value {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.code__hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  opacity: 0.75;
 }
 
 /* Форма поверх экрана ---------------------------------------------------- */
