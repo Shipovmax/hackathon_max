@@ -8,7 +8,7 @@ import { AsyncView } from '../components/AsyncView';
 import { DateNav } from '../components/DateNav';
 import { PhotoView } from '../components/PhotoView';
 import { Screen } from '../components/Screen';
-import { TaskStatusBadge } from '../components/StatusBadge';
+import { StatusDot, TaskStatusBadge, taskTone } from '../components/StatusBadge';
 import { formatRange, today } from '../lib/format';
 
 // Плановое время стоит слева, поэтому в подписи только то, что произошло.
@@ -53,13 +53,15 @@ export function StoreDay() {
             <DateNav date={date} onChange={setDate} />
           </div>
 
-          {state.loading ? (
-            <div className="screen__block">
-              <Typography.Label variant="small">Обновляем…</Typography.Label>
-            </div>
-          ) : null}
+          <div className="screen__block" aria-live="polite">
+            {state.loading && (
+              <Typography.Label variant="small" className="muted">
+                Обновляем…
+              </Typography.Label>
+            )}
+          </div>
 
-          <CellList mode="island">
+          <CellList mode="island" className="timeline__list">
             {data.tasks.length === 0 && <CellSimple title="Задач на этот день нет" />}
             {data.tasks.map((task) => (
               <CellSimple
@@ -67,7 +69,12 @@ export function StoreDay() {
                 title={task.title}
                 subtitle={subtitle(task)}
                 after={<TaskStatusBadge status={task.status} lateMinutes={task.late_minutes} />}
-                before={<span className="timeline">{task.planned_time}</span>}
+                before={
+                  <span className="timeline">
+                    <span className="timeline__time">{task.planned_time}</span>
+                    <StatusDot tone={taskTone(task.status)} />
+                  </span>
+                }
                 showChevron={Boolean(task.photo_url)}
                 onClick={task.photo_url ? () => setPhoto(task) : undefined}
               />
