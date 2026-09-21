@@ -9,10 +9,11 @@ import { AsyncView } from '../components/AsyncView';
 import { Empty } from '../components/Empty';
 import { ErrorNote } from '../components/ErrorNote';
 import { SwitchField, TextField } from '../components/Field';
+import { TimeField } from '../components/TimeField';
 import { Screen } from '../components/Screen';
 import { Sheet } from '../components/Sheet';
 import { useToast } from '../components/Toast';
-import { formatDate, isValidTime, normalizeTime, today } from '../lib/format';
+import { formatDate, isValidTime, today } from '../lib/format';
 
 function describe(task: TaskTemplateItem): string {
   const when = task.kind === 'daily' ? `Ежедневно в ${task.planned_time}` : `${formatDate(task.on_date ?? '')} в ${task.planned_time}`;
@@ -176,13 +177,7 @@ function TaskEditor({ storeId, task, onClose, onDone }: TaskEditorProps) {
   return (
     <Sheet title={existing ? 'Задача точки' : form.kind === 'daily' ? 'Новая ежедневная задача' : 'Новая разовая задача'} open onClose={onClose}>
       <TextField label="Название" value={form.title} onChange={(title) => patch({ title })} placeholder="Открытие магазина" />
-      <TextField
-        label="Плановое время"
-        value={form.planned_time}
-        onChange={(value) => patch({ planned_time: normalizeTime(value) })}
-        inputMode="numeric"
-        placeholder="09:00"
-      />
+      <TimeField label="Плановое время" value={form.planned_time} onChange={(planned_time) => patch({ planned_time })} />
       {form.kind === 'one_time' && (
         <label className="field">
           <Typography.Label variant="small">Дата</Typography.Label>

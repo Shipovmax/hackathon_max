@@ -11,7 +11,7 @@ import { Icon } from '../components/Icon';
 import { ErrorNote } from '../components/ErrorNote';
 import { Screen } from '../components/Screen';
 import { Sheet } from '../components/Sheet';
-import { TextField } from '../components/Field';
+import { TimeField } from '../components/TimeField';
 import { useToast } from '../components/Toast';
 import { findGaps } from '../lib/coverage';
 import {
@@ -21,7 +21,6 @@ import {
   formatWeekRange,
   isValidTime,
   minutesOf,
-  normalizeTime,
   today,
   WEEKDAYS,
   weekStart,
@@ -381,8 +380,8 @@ function ShiftEditor({ state, onClose, onApply, onClear }: ShiftEditorProps) {
 
   return (
     <Sheet title={`${state.employeeName} · ${formatDayLabel(state.date)}`} open onClose={onClose}>
-      <TextField label="Начало" value={start} onChange={(value) => setStart(normalizeTime(value))} inputMode="numeric" placeholder="09:00" />
-      <TextField label="Конец" value={end} onChange={(value) => setEnd(normalizeTime(value))} inputMode="numeric" placeholder="17:00" />
+      <TimeField label="Начало" value={start} onChange={setStart} />
+      <TimeField label="Конец" value={end} onChange={setEnd} />
       {problem && <div className="alert alert--bad">{problem}</div>}
       <Button stretched onClick={submit}>
         Сохранить смену

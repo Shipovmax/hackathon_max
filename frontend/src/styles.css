@@ -131,10 +131,35 @@ select {
  * Островки MAX UI: библиотека даёт фон, но не даёт ни волосяной границы, ни тени.
  * Класс с хешем матчим по началу имени — если библиотека переименует его, правило
  * просто перестанет применяться и вид останется библиотечным.
+ *
+ * Островок — это внешний блок с полями 0 12px и вложенная карточка (CellList__body).
+ * Поля отодвигали карточку от края, и список выглядел «рамкой в рамке», в отличие от
+ * плашки сводки. Поля убираем, границу и тень рисуем на самой карточке. Заголовок
+ * группы, если он есть, остаётся над карточкой на прежнем месте.
  */
 .app-root [class*='CellList_mode_island'] {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.app-root [class*='CellList_mode_island'] > :not([class*='CellList__body']) {
+  margin-right: 12px;
+  margin-left: 12px;
+}
+
+.app-root [class*='CellList_mode_island'] > [class*='CellList__body'] {
   border-radius: var(--radius);
   box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow);
+}
+
+/*
+ * Плашка сводки лежит в .screen__block с боковыми полями, а списки стоят в .screen
+ * прямо и тянутся на всю ширину. Даём им те же поля, чтобы края совпадали.
+ */
+.screen > [class*='CellList_mode_island'] {
+  width: auto;
+  margin-right: 16px;
+  margin-left: 16px;
 }
 
 /* Крупные заголовки в плотном трекинге читаются дороже. */
@@ -684,6 +709,137 @@ select {
   background: var(--sunken);
 }
 
+/* Выбор времени: строка со значением и два колеса под ней ---------------- */
+
+:root {
+  --wheel-item: 40px; /* держим в паре с ITEM в TimeField.tsx */
+}
+
+.timefield__value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  text-align: left;
+  background: var(--sunken);
+  cursor: pointer;
+}
+
+.timefield__value--empty {
+  opacity: 0.55;
+}
+
+.timefield__chevron {
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  opacity: 0.45;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 180ms var(--ease);
+}
+
+.timefield__value[aria-expanded='true'] .timefield__chevron {
+  transform: translateY(2px) rotate(-135deg);
+}
+
+.timefield__panel {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  height: calc(var(--wheel-item) * 5);
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--sunken);
+  animation: fade 160ms var(--ease);
+}
+
+/* Полоса под выбранной строкой. */
+.timefield__panel::before {
+  content: '';
+  position: absolute;
+  top: calc(50% - var(--wheel-item) / 2);
+  right: 10px;
+  left: 10px;
+  height: var(--wheel-item);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.timefield__panel:has(.wheel:focus-visible)::before {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.timefield__colon {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  padding-bottom: 2px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.wheel {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 84px;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  outline: none;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 30%, #000 70%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 30%, #000 70%, transparent);
+}
+
+.wheel::-webkit-scrollbar {
+  display: none;
+}
+
+/* Пустое поле на две строки: без него первую и последнюю строку не поставить по центру. */
+.wheel__pad {
+  height: calc(var(--wheel-item) * 2);
+}
+
+.wheel__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--wheel-item);
+  scroll-snap-align: center;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  opacity: 0.4;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 120ms var(--ease);
+}
+
+.wheel__item--on {
+  font-weight: 600;
+  opacity: 1;
+}
+
 .code {
   display: flex;
   flex-direction: column;
@@ -913,6 +1069,11 @@ select {
 @media (max-width: 520px) {
   .screen {
     padding-top: 8px;
+  }
+
+  .screen > [class*='CellList_mode_island'] {
+    margin-right: 14px;
+    margin-left: 14px;
   }
 
   .screen__header,

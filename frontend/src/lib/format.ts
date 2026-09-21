@@ -53,14 +53,6 @@ export function isValidTime(value: string): boolean {
   return h < 24 && m < 60;
 }
 
-/** «9:5» → «09:05». Вводить двоеточие вручную неудобно, поэтому нормализуем. */
-export function normalizeTime(value: string): string {
-  const digits = value.replace(/\D/g, '').slice(0, 4);
-  if (digits.length === 0) return '';
-  if (digits.length <= 2) return digits;
-  return `${digits.slice(0, digits.length - 2).padStart(2, '0')}:${digits.slice(-2)}`;
-}
-
 export function minutesOf(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return h * 60 + m;

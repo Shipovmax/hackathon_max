@@ -9,10 +9,11 @@ import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
 import { ErrorNote } from '../components/ErrorNote';
 import { TextField } from '../components/Field';
+import { TimeField } from '../components/TimeField';
 import { Screen } from '../components/Screen';
 import { Sheet } from '../components/Sheet';
 import { useToast } from '../components/Toast';
-import { formatRange, isValidTime, normalizeTime } from '../lib/format';
+import { formatRange, isValidTime } from '../lib/format';
 
 const STATUS: Record<Person['status'], string> = {
   connected: 'в боте',
@@ -129,8 +130,8 @@ function StoreForm({ open, onClose, onDone }: { open: boolean; onClose: () => vo
     <Sheet title="Новая точка" open={open} onClose={onClose}>
       <TextField label="Название" value={form.name} onChange={(name) => setForm({ ...form, name })} placeholder="Ленина, 14" />
       <TextField label="Адрес" value={form.address} onChange={(address) => setForm({ ...form, address })} placeholder="ул. Ленина, 14" />
-      <TextField label="Открытие" value={form.open_time} onChange={(value) => setForm({ ...form, open_time: normalizeTime(value) })} inputMode="numeric" />
-      <TextField label="Закрытие" value={form.close_time} onChange={(value) => setForm({ ...form, close_time: normalizeTime(value) })} inputMode="numeric" />
+      <TimeField label="Открытие" value={form.open_time} onChange={(open_time) => setForm({ ...form, open_time })} />
+      <TimeField label="Закрытие" value={form.close_time} onChange={(close_time) => setForm({ ...form, close_time })} />
       {problem && <div className="alert alert--bad">{problem}</div>}
       <ErrorNote error={save.error} />
       <Button stretched loading={save.running} onClick={submit}>
