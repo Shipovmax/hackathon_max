@@ -156,7 +156,12 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
   };
 
   return (
-    <Screen title="График смен" subtitle={`${formatWeekRange(data.week_start)} · ${data.status === 'draft' ? 'черновик' : 'опубликован'}`} back>
+    <Screen
+      title="График смен"
+      subtitle={`${formatWeekRange(data.week_start)} · ${data.status === 'draft' ? 'черновик' : 'опубликован'}`}
+      back
+      backTo={`/stores/${storeId}`}
+    >
       <div className="screen__block">
         <div className="datenav">
           <IconButton

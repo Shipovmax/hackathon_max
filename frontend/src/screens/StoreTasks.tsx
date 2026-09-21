@@ -42,7 +42,12 @@ export function StoreTasks() {
   return (
     <AsyncView state={state}>
       {() => (
-        <Screen title="Задачи точки" subtitle="Из них бот составляет список дня" back>
+        <Screen
+          title="Задачи точки"
+          subtitle="Из них бот составляет список дня"
+          back
+          backTo={`/stores/${storeId}`}
+        >
           {daily.length === 0 && once.length === 0 && (
             <div className="screen__block">
               <Empty

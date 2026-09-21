@@ -56,6 +56,7 @@ export function StoreDay() {
               : 'Никого на смене'
           }
           back
+          backTo="/"
         >
           <div className="screen__block">
             <DateNav date={date} onChange={setDate} />

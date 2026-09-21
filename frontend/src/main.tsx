@@ -21,12 +21,13 @@ if (deepLink && window.location.pathname === '/') {
 
 function Root() {
   const { scheme } = useTheme();
+  const platform = getPlatform();
 
   return (
     <MaxUI
-      className="app-root"
+      className={`app-root app-root--${platform}`}
       resetBody
-      platform={getPlatform() === 'ios' ? 'ios' : 'android'}
+      platform={platform === 'ios' ? 'ios' : 'android'}
       colorScheme={scheme}
     >
       <BrowserRouter>
