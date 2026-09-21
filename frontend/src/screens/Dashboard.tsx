@@ -9,9 +9,11 @@ import { Icon } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import { healthTone, HealthBadge, Progress, StatusDot } from '../components/StatusBadge';
 import { formatDate, plural } from '../lib/format';
+import { useTheme } from '../max/theme';
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const theme = useTheme();
   const state = useApi<DashboardData>('/dashboard/');
 
   return (
@@ -26,15 +28,25 @@ export function Dashboard() {
             title="Мои точки"
             subtitle={`Сегодня, ${formatDate(data.date)}`}
             action={
-              <IconButton
-                size="small"
-                variant="secondary"
-                aria-label="Обновить"
-                loading={state.loading}
-                onClick={state.reload}
-              >
-                <Icon name="refresh" />
-              </IconButton>
+              <span className="screen__actions">
+                <IconButton
+                  size="small"
+                  variant="secondary"
+                  aria-label={theme.scheme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+                  onClick={theme.toggle}
+                >
+                  <Icon name={theme.scheme === 'dark' ? 'sun' : 'moon'} />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  variant="secondary"
+                  aria-label="Обновить"
+                  loading={state.loading}
+                  onClick={state.reload}
+                >
+                  <Icon name="refresh" />
+                </IconButton>
+              </span>
             }
           >
             {data.stores.length > 0 && (

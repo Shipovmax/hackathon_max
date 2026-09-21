@@ -2,12 +2,13 @@ import '@maxhub/max-ui/dist/styles.css';
 import './styles.css';
 
 import { MaxUI } from '@maxhub/max-ui';
-import { StrictMode, useEffect, useState } from 'react';
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 
 import { App } from './App';
-import { getPlatform, startRoute, watchColorScheme } from './max/bridge';
+import { getPlatform, startRoute } from './max/bridge';
+import { useTheme } from './max/theme';
 
 // Диплинк из уведомления подставляем в адрес до старта роутера, чтобы «Назад»
 // вёл на сводку, а не наружу из приложения.
@@ -19,18 +20,14 @@ if (deepLink && window.location.pathname === '/') {
 }
 
 function Root() {
-  const [colorScheme, setColorScheme] = useState<'light' | 'dark'>(
-    window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
-  );
-
-  useEffect(() => watchColorScheme(setColorScheme), []);
+  const { scheme } = useTheme();
 
   return (
     <MaxUI
       className="app-root"
       resetBody
       platform={getPlatform() === 'ios' ? 'ios' : 'android'}
-      colorScheme={colorScheme}
+      colorScheme={scheme}
     >
       <BrowserRouter>
         <App />

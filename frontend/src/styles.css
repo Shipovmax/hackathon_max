@@ -10,18 +10,103 @@
   --warn: #d9822b;
   --bad: #e5484d;
   --idle: #8a8f98;
-  --accent: #2d7ef6;
   --step: 12px;
-  --radius: 14px;
+  --radius: 16px;
   --ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/*
+ * Две темы. Светлая уходит от чистого белого к молочному, тёмная — от чёрного
+ * к графиту: плоская заливка на весь экран выглядит дешевле, чем мягкий переход.
+ *
+ * Палитра живёт на :root, потому что форма поверх экрана, фото и тост рисуются
+ * порталами в <body> — за пределами .app-root. А токены самой MAX UI
+ * переопределяются ниже на .app-root: библиотека объявляет их там же, и наш файл
+ * подключается после её стилей, поэтому при равной силе выигрывает он.
+ */
+:root,
+:root[data-theme='light'] {
+  --page: linear-gradient(180deg, #ffffff 0%, #fbf8f3 55%, #f5f1e9 100%);
+  --surface: #f5f1e9;
+  --card: #fffefc;
+  --raised: #faf7f2;
+  --sunken: rgba(36, 28, 16, 0.05);
+  --hairline: rgba(36, 28, 16, 0.09);
+  --highlight: rgba(255, 255, 255, 0.9);
+  --shadow: 0 1px 2px rgba(32, 25, 14, 0.04), 0 10px 28px rgba(32, 25, 14, 0.06);
+  --accent: #007aff;
+  --ink: #060708;
+  --veil: rgba(255, 253, 250, 0.72);
+  --overlay: rgba(28, 22, 14, 0.36);
+}
+
+:root[data-theme='dark'] {
+  --page: linear-gradient(180deg, #050506 0%, #0c0d10 55%, #131519 100%);
+  --surface: #050506;
+  --card: #1a1c22;
+  --raised: #202329;
+  --sunken: rgba(255, 255, 255, 0.07);
+  --hairline: rgba(255, 255, 255, 0.1);
+  --highlight: rgba(255, 255, 255, 0.06);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 14px 34px rgba(0, 0, 0, 0.45);
+  --accent: #3d95ff;
+  --ink: #ffffff;
+  --veil: rgba(13, 14, 17, 0.72);
+  --overlay: rgba(0, 0, 0, 0.64);
+}
+
+/* Пока JS не выставил data-theme, идём за темой системы. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --page: linear-gradient(180deg, #050506 0%, #0c0d10 55%, #131519 100%);
+    --surface: #050506;
+    --card: #1a1c22;
+    --raised: #202329;
+    --sunken: rgba(255, 255, 255, 0.07);
+    --hairline: rgba(255, 255, 255, 0.1);
+    --highlight: rgba(255, 255, 255, 0.06);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 14px 34px rgba(0, 0, 0, 0.45);
+    --accent: #3d95ff;
+    --ink: #ffffff;
+    --veil: rgba(13, 14, 17, 0.72);
+    --overlay: rgba(0, 0, 0, 0.64);
+  }
+}
+
+/* Токены MAX UI под нашу палитру: компоненты библиотеки красятся вместе с экраном. */
+.app-root {
+  --background-surface: var(--surface);
+  --background-primary: var(--card);
+  --background-secondary: var(--raised);
+  --background-card: var(--card);
+  --background-tertiary: var(--sunken);
+  --background-overlay: var(--overlay);
+
+  min-height: 100vh;
+  background: var(--page);
+  background-attachment: fixed;
 }
 
 body {
   margin: 0;
+  background: var(--surface);
 }
 
-.app-root {
-  min-height: 100vh;
+/*
+ * Островки MAX UI: библиотека даёт фон, но не даёт ни волосяной границы, ни тени.
+ * Класс с хешем матчим по началу имени — если библиотека переименует его, правило
+ * просто перестанет применяться и вид останется библиотечным.
+ */
+.app-root [class*='CellList_mode_island'] {
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow);
+}
+
+/* Крупные заголовки в плотном трекинге читаются дороже. */
+.screen__titles h1,
+.screen__titles h2,
+.screen__titles h3 {
+  letter-spacing: -0.015em;
 }
 
 /* Экран ------------------------------------------------------------------ */
@@ -44,10 +129,23 @@ body {
 }
 
 .screen__header {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 5;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--step);
+  padding-top: 6px;
+  padding-bottom: 10px;
+  background: var(--veil);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.screen__actions {
+  display: flex;
+  gap: 8px;
 }
 
 .screen__titles {
@@ -87,22 +185,46 @@ body {
 /* Сводка ----------------------------------------------------------------- */
 
 .summary {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 16px;
+  gap: 8px;
+  overflow: hidden;
+  padding: 18px;
   border-radius: var(--radius);
-  background: var(--background-card, #fff);
-  box-shadow: inset 0 0 0 1px var(--background-tertiary, rgba(138, 143, 152, 0.16));
-  border-left: 4px solid var(--idle);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow);
+}
+
+/* Тонкая световая грань сверху — от неё карточка читается как объём. */
+.summary::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: var(--highlight);
+}
+
+/* Цвет состояния уходит в подложку, а не в рамку: спокойнее и дороже. */
+.summary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(135deg, var(--tint) 0%, transparent 62%);
 }
 
 .summary--ok {
-  border-left-color: var(--ok);
+  --tint: rgba(31, 157, 76, 0.14);
 }
 
 .summary--bad {
-  border-left-color: var(--bad);
+  --tint: rgba(229, 72, 77, 0.16);
+}
+
+.summary > * {
+  position: relative;
+  z-index: 1;
 }
 
 .storerow {
@@ -118,7 +240,7 @@ body {
   max-width: 220px;
   height: 4px;
   border-radius: 999px;
-  background: var(--background-tertiary, rgba(138, 143, 152, 0.16));
+  background: var(--sunken);
 }
 
 .progress__fill {
@@ -130,15 +252,15 @@ body {
 }
 
 .progress__fill--ok {
-  background: var(--ok);
+  background: linear-gradient(90deg, #17b85a, var(--ok));
 }
 
 .progress__fill--warn {
-  background: var(--warn);
+  background: linear-gradient(90deg, #f0a84a, var(--warn));
 }
 
 .progress__fill--bad {
-  background: var(--bad);
+  background: linear-gradient(90deg, #f0666a, var(--bad));
 }
 
 /* Пустой экран ----------------------------------------------------------- */
@@ -148,11 +270,11 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 28px 20px;
+  padding: 32px 20px;
   border-radius: var(--radius);
   text-align: center;
-  background: var(--background-card, #fff);
-  box-shadow: inset 0 0 0 1px var(--background-tertiary, rgba(138, 143, 152, 0.16));
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow);
 }
 
 .empty__icon {
@@ -164,7 +286,7 @@ body {
   margin-bottom: 2px;
   border-radius: 50%;
   color: var(--accent);
-  background: rgba(45, 126, 246, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .icon {
@@ -230,7 +352,7 @@ body {
   gap: 4px;
   padding: var(--step);
   border-radius: var(--radius);
-  background: var(--background-tertiary, rgba(138, 143, 152, 0.14));
+  background: var(--sunken);
 }
 
 .alert--bad {
@@ -271,7 +393,7 @@ body {
   width: 2px;
   height: 28px;
   transform: translateX(-50%);
-  background: var(--background-tertiary, rgba(138, 143, 152, 0.2));
+  background: var(--sunken);
 }
 
 .timeline__list > *:last-child .dot::after {
@@ -311,9 +433,10 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 8px 10px;
   border-radius: var(--radius);
-  background: var(--background-tertiary, rgba(138, 143, 152, 0.12));
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 
 /* График ----------------------------------------------------------------- */
@@ -377,7 +500,8 @@ body {
   font-variant-numeric: tabular-nums;
   color: inherit;
   opacity: 0.45;
-  background: var(--background-tertiary, rgba(138, 143, 152, 0.14));
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px transparent;
   cursor: pointer;
   transition:
     transform 140ms var(--ease),
@@ -387,8 +511,9 @@ body {
 .schedule__cell--filled {
   opacity: 1;
   color: var(--accent);
-  font-weight: 500;
-  background: rgba(45, 126, 246, 0.16);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .schedule__cell:active {
@@ -396,7 +521,7 @@ body {
 }
 
 .schedule__col--today .schedule__cell {
-  box-shadow: inset 0 0 0 1px rgba(45, 126, 246, 0.5);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 /* Полоса покрытия недели. */
@@ -424,14 +549,15 @@ body {
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(31, 157, 76, 0.35);
+  background: linear-gradient(90deg, rgba(31, 157, 76, 0.45), rgba(31, 157, 76, 0.3));
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 
 .coverage__gap {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: var(--bad);
+  background: linear-gradient(180deg, #f0666a, var(--bad));
 }
 
 /* Формы ------------------------------------------------------------------ */
@@ -468,8 +594,8 @@ body {
   border: 0;
   border-radius: 10px;
   font: inherit;
-  color: var(--text-primary, inherit);
-  background: var(--background-tertiary, rgba(138, 143, 152, 0.16));
+  color: var(--ink);
+  background: var(--sunken);
 }
 
 .code {
@@ -483,7 +609,8 @@ body {
   border-radius: var(--radius);
   font: inherit;
   color: var(--accent);
-  background: rgba(45, 126, 246, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
   cursor: pointer;
   transition: transform 140ms var(--ease);
 }
@@ -516,7 +643,9 @@ body {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: var(--background-overlay, rgba(0, 0, 0, 0.45));
+  background: var(--overlay);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   animation: fade 180ms var(--ease);
 }
 
@@ -527,9 +656,10 @@ body {
   max-height: 88vh;
   overflow-y: auto;
   padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
-  border-radius: 18px 18px 0 0;
-  background: var(--background-card, #fff);
-  color: var(--text-primary, inherit);
+  border-radius: 22px 22px 0 0;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: inset 0 1px 0 var(--highlight), 0 -18px 48px rgba(0, 0, 0, 0.3);
   animation: rise 240ms var(--ease);
 }
 
@@ -541,7 +671,7 @@ body {
   height: 4px;
   margin: 0 auto 10px;
   border-radius: 999px;
-  background: var(--background-tertiary, rgba(138, 143, 152, 0.3));
+  background: var(--sunken);
 }
 
 .sheet__header {
@@ -611,9 +741,9 @@ body {
   border-radius: var(--radius);
   font-size: 14px;
   text-align: center;
-  color: var(--text-primary, #060708);
-  background: var(--background-card, #fff);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  color: var(--ink);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--hairline), 0 10px 32px rgba(0, 0, 0, 0.3);
   animation: toast-in 220ms var(--ease);
 }
 
