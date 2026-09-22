@@ -1,36 +1,43 @@
 import { Button, CellHeader, CellList, CellSimple, Typography } from '@maxhub/max-ui';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 
-import { apiDelete, apiPatch, apiPost } from '../api/client';
-import { useAction, useApi } from '../api/hooks';
+import { useApi } from '../api/hooks';
 import type { TaskTemplateInput, TaskTemplateItem } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
 import { Empty } from '../components/Empty';
-import { ErrorNote } from '../components/ErrorNote';
-import { SwitchField, TextField } from '../components/Field';
-import { TimeField } from '../components/TimeField';
 import { Screen } from '../components/Screen';
-import { Sheet } from '../components/Sheet';
-import { useToast } from '../components/Toast';
-import { formatDate, isValidTime, today } from '../lib/format';
+import { TaskEditor } from '../components/TaskEditor';
+import { DEFAULT_LEAD_MINUTES, earlierBy, formatDate, today } from '../lib/format';
 
 function describe(task: TaskTemplateItem): string {
   const when = task.kind === 'daily' ? `Ежедневно в ${task.planned_time}` : `${formatDate(task.on_date ?? '')} в ${task.planned_time}`;
-  return [when, `допуск +${task.tolerance_minutes} мин`, task.requires_claim && '«Беру»', task.requires_photo && 'фото']
+  return [
+    when,
+    `отметить с ${task.available_from}`,
+    `допуск +${task.tolerance_minutes} мин`,
+    task.requires_claim && '«Беру»',
+    task.requires_photo && 'фото',
+  ]
     .filter(Boolean)
     .join(' · ');
 }
 
-const blank = (kind: TaskTemplateItem['kind']): TaskTemplateInput => ({
-  title: '',
-  kind,
-  planned_time: kind === 'daily' ? '09:00' : '14:00',
-  on_date: kind === 'daily' ? null : today(),
-  tolerance_minutes: 15,
-  requires_photo: true,
-  requires_claim: kind === 'one_time',
-});
+const blank = (kind: TaskTemplateItem['kind']): TaskTemplateInput => {
+  const planned = kind === 'daily' ? '09:00' : '14:00';
+  return {
+    title: '',
+    kind,
+    planned_time: planned,
+    available_from: earlierBy(planned, DEFAULT_LEAD_MINUTES),
+    on_date: kind === 'daily' ? null : today(),
+    tolerance_minutes: 15,
+    requires_photo: true,
+    // «Беру» — осознанный выбор владельца, а не значение по умолчанию: задача
+    // с ним требует, чтобы кто-то из смены её принял.
+    requires_claim: false,
+  };
+};
 
 export function StoreTasks() {
   const { storeId } = useParams();
@@ -112,118 +119,5 @@ export function StoreTasks() {
         </Screen>
       )}
     </AsyncView>
-  );
-}
-
-interface TaskEditorProps {
-  storeId: number;
-  task: TaskTemplateItem | TaskTemplateInput | null;
-  onClose: () => void;
-  onDone: () => void;
-}
-
-function TaskEditor({ storeId, task, onClose, onDone }: TaskEditorProps) {
-  const toast = useToast();
-  const save = useAction();
-  const remove = useAction();
-  const [form, setForm] = useState<TaskTemplateInput | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  useEffect(() => {
-    if (!task) return;
-    const { title, kind, planned_time, on_date, tolerance_minutes, requires_photo, requires_claim } = task;
-    setForm({ title, kind, planned_time, on_date, tolerance_minutes, requires_photo, requires_claim });
-    setProblem(null);
-    setConfirmDelete(false);
-  }, [task]);
-
-  if (!task || !form) return null;
-  const existing = 'id' in task ? task : null;
-  const patch = (fields: Partial<TaskTemplateInput>) => setForm({ ...form, ...fields });
-
-  const submit = async () => {
-    if (form.title.trim().length < 2) {
-      setProblem('Введите название задачи');
-      return;
-    }
-    if (!isValidTime(form.planned_time)) {
-      setProblem('Плановое время в формате ЧЧ:ММ, например 09:00');
-      return;
-    }
-    if (form.kind === 'one_time' && !form.on_date) {
-      setProblem('Укажите дату разовой задачи');
-      return;
-    }
-    const body = { ...form, title: form.title.trim() };
-    const result = await save.run(() =>
-      existing
-        ? apiPatch<TaskTemplateItem>(`/task-templates/${existing.id}/`, body)
-        : apiPost<TaskTemplateItem>(`/stores/${storeId}/task-templates/`, body),
-    );
-    if (!result) return;
-    toast.show(existing ? 'Задача изменена' : 'Задача добавлена');
-    onDone();
-  };
-
-  const submitDelete = async () => {
-    if (!existing) return;
-    const result = await remove.run(() => apiDelete(`/task-templates/${existing.id}/`));
-    if (result === undefined) return;
-    toast.show('Задача удалена');
-    onDone();
-  };
-
-  return (
-    <Sheet title={existing ? 'Задача точки' : form.kind === 'daily' ? 'Новая ежедневная задача' : 'Новая разовая задача'} open onClose={onClose}>
-      <TextField label="Название" value={form.title} onChange={(title) => patch({ title })} placeholder="Открытие магазина" />
-      <TimeField label="Плановое время" value={form.planned_time} onChange={(planned_time) => patch({ planned_time })} />
-      {form.kind === 'one_time' && (
-        <label className="field">
-          <Typography.Label variant="small">Дата</Typography.Label>
-          <input
-            className="field__date"
-            type="date"
-            value={form.on_date ?? ''}
-            onChange={(event) => patch({ on_date: event.target.value })}
-          />
-        </label>
-      )}
-      <TextField
-        label="Допустимая задержка, мин"
-        value={String(form.tolerance_minutes)}
-        onChange={(value) => patch({ tolerance_minutes: Number(value.replace(/\D/g, '')) || 0 })}
-        inputMode="numeric"
-        hint="После этого времени задача считается просроченной и владелец получает уведомление"
-      />
-      <SwitchField
-        label="Нужно фото"
-        checked={form.requires_photo}
-        onChange={(requires_photo) => patch({ requires_photo })}
-      />
-      <SwitchField
-        label="Требуется «Беру»"
-        hint="Бот спросит смену, кто принимает, и закрепит задачу за первым откликнувшимся"
-        checked={form.requires_claim}
-        onChange={(requires_claim) => patch({ requires_claim })}
-      />
-
-      {problem && <div className="alert alert--bad">{problem}</div>}
-      <ErrorNote error={save.error ?? remove.error} />
-
-      <Button stretched loading={save.running} onClick={submit}>
-        {existing ? 'Сохранить' : 'Добавить'}
-      </Button>
-      {existing &&
-        (confirmDelete ? (
-          <Button variant="destructive" stretched loading={remove.running} onClick={submitDelete}>
-            Точно удалить задачу
-          </Button>
-        ) : (
-          <Button variant="secondary" stretched onClick={() => setConfirmDelete(true)}>
-            Удалить задачу
-          </Button>
-        ))}
-    </Sheet>
   );
 }

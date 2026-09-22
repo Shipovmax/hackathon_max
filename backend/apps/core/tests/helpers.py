@@ -42,12 +42,14 @@ def make_template(
     *,
     claim: bool = False,
     one_time_on: dt.date | None = None,
+    available_from=(0, 0),
 ) -> TaskTemplate:
     return TaskTemplate.objects.create(
         store=store,
         title=title,
         kind=TaskKind.ONE_TIME if one_time_on else TaskKind.DAILY,
         planned_time=dt.time(*at),
+        available_from=dt.time(*available_from),
         on_date=one_time_on,
         tolerance_minutes=tolerance,
         requires_claim=claim,

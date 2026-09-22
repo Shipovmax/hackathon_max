@@ -103,6 +103,11 @@ def board_row_unclaimed(planned: str) -> str:
 BOARD_ROW_MISSED = "не выполнено за смену"
 
 
+def board_row_not_yet(available_from: str) -> str:
+    """Задача ещё впереди: кнопки у неё нет, чтобы её нельзя было закрыть заранее."""
+    return f"отметить можно с {available_from}"
+
+
 def board_row_claim_free(planned: str) -> str:
     return f"в {planned}, нужно нажать «Беру»"
 
@@ -200,6 +205,13 @@ def denial_not_started(shift_start: str, task_title: str, who_starts: str) -> st
 
 def denial_ended(shift_end: str, task_title: str, who_ends: str) -> str:
     return f"Ваша смена завершилась в {shift_end}. {task_title} отметит {who_ends}."
+
+
+def denial_too_early(task_title: str, available_from: str, planned: str) -> str:
+    return (
+        f"{task_title} можно отметить с {available_from}, плановое время — {planned}. "
+        f"Задача появится в списке, когда подойдёт срок."
+    )
 
 
 def denial_already_done(task_title: str, employee_name: str, at: str) -> str:

@@ -1,3 +1,5 @@
+from datetime import time
+
 from django.db import models
 from django.db.models import Q
 
@@ -26,6 +28,10 @@ class TaskTemplate(models.Model):
     title = models.CharField(max_length=200)
     kind = models.CharField(max_length=16, choices=TaskKind.choices, default=TaskKind.DAILY)
     planned_time = models.TimeField()
+    # С какого момента задачу вообще можно отметить. Без этой границы закрытие смены,
+    # запланированное на 22:00, закрывалось бы в час дня. По умолчанию ограничения нет —
+    # осмысленное окно ставит тот, кто заводит задачу; из приложения оно приходит всегда.
+    available_from = models.TimeField(default=time.min)
     on_date = models.DateField(null=True, blank=True)
     tolerance_minutes = models.PositiveSmallIntegerField(default=15)
     requires_photo = models.BooleanField(default=True)

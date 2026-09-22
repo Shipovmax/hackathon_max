@@ -58,6 +58,16 @@ export function minutesOf(time: string): number {
   return h * 60 + m;
 }
 
+/** Насколько раньше планового времени задачу можно отметить, если владелец не выбрал своё. */
+export const DEFAULT_LEAD_MINUTES = 30;
+
+/** «22:00» минус 30 → «21:30». Через полночь не переходим, упираемся в 00:00. */
+export function earlierBy(time: string, minutes: number): string {
+  const left = minutesOf(time) - minutes;
+  if (!Number.isFinite(left) || left <= 0) return '00:00';
+  return `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
+}
+
 /** «22–28 сент» — подпись недели в графике. */
 export function formatWeekRange(week: string): string {
   const end = addDays(week, 6);

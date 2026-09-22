@@ -86,3 +86,44 @@ class CheckCanMarkTests(TestCase):
         self.assertTrue(self.check(self.igor, 10).allowed)
         self.assertTrue(self.check(self.igor, 15).allowed)
         self.assertEqual(self.check(self.igor, 12).denial, MarkDenial.NOT_STARTED)
+
+
+class TaskWindowTests(TestCase):
+    """
+    У задачи есть время, раньше которого её не отметить.
+
+    Без него закрытие смены, запланированное на 22:00, закрывалось бы в час дня —
+    смена-то идёт.
+    """
+
+    def setUp(self):
+        network = make_network()
+        self.store = make_store(network)
+        make_template(self.store, "Closing", at=(22, 0), available_from=(21, 30))
+        self.instance = ensure_instances(self.store, DAY)[0]
+        self.igor = Employee.objects.create(store=self.store, name="Igor")
+        make_shift(self.igor, start=(9, 0), end=(23, 0))
+
+    def check(self, hour, minute=0):
+        return check_can_mark(self.igor, self.instance, moscow(hour, minute))
+
+    def test_too_early_during_the_shift_is_refused_with_the_time(self):
+        decision = self.check(13)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.denial, MarkDenial.TOO_EARLY)
+        self.assertEqual(decision.available_from, dt.time(21, 30))
+
+    def test_allowed_once_the_window_opens(self):
+        self.assertFalse(self.check(21, 29).allowed)
+        self.assertTrue(self.check(21, 30).allowed)
+        self.assertTrue(self.check(22, 30).allowed)
+
+    def test_window_from_midnight_keeps_the_task_open_all_shift(self):
+        template = self.instance.template
+        template.available_from = dt.time(0, 0)
+        template.save(update_fields=["available_from"])
+        self.assertTrue(self.check(13).allowed)
+
+    def test_finished_shift_still_wins_over_the_window(self):
+        """Порядок отказов важен: сначала смена, потом окно задачи."""
+        self.assertEqual(self.check(23, 30).denial, MarkDenial.ENDED)

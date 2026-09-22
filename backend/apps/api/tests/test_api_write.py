@@ -116,6 +116,23 @@ class TaskTemplateTests(OwnerApiTestCase):
         self.assertFalse(body["requires_claim"])
         self.assertIsNone(body["on_date"])
 
+    def test_completion_window_defaults_to_half_an_hour_before_the_plan(self):
+        body = self.call("post", self.path(), {"title": "Closing", "planned_time": "22:00"}).json()
+        self.assertEqual(body["available_from"], "21:30")
+
+    def test_completion_window_is_kept_as_given(self):
+        payload = {"title": "Closing", "planned_time": "22:00", "available_from": "20:00"}
+        body = self.call("post", self.path(), payload).json()
+        self.assertEqual(body["available_from"], "20:00")
+
+    def test_completion_window_cannot_start_after_the_plan(self):
+        payload = {"title": "Closing", "planned_time": "22:00", "available_from": "22:30"}
+        self.assertEqual(self.call("post", self.path(), payload).status_code, 400)
+
+    def test_early_plan_clamps_the_window_to_midnight(self):
+        body = self.call("post", self.path(), {"title": "Night", "planned_time": "00:10"}).json()
+        self.assertEqual(body["available_from"], "00:00")
+
     def test_one_time_task_needs_a_date(self):
         payload = {"title": "Delivery", "planned_time": "14:00", "kind": "one_time"}
         self.assertEqual(self.call("post", self.path(), payload).status_code, 400)

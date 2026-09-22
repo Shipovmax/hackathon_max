@@ -35,8 +35,12 @@ export interface Dashboard {
 
 export interface DayTask {
   id: number;
+  /** Шаблон задачи: по нему карточка точки открывает редактирование прямо из списка дня. */
+  template_id: number;
   title: string;
   planned_time: string;
+  available_from: string;
+  kind: 'daily' | 'one_time';
   status: TaskStatus;
   late_minutes: number | null;
   done_by: string | null;
@@ -89,6 +93,8 @@ export interface TaskTemplateItem {
   title: string;
   kind: 'daily' | 'one_time';
   planned_time: string;
+  /** Раньше этого времени задачу отметить нельзя. */
+  available_from: string;
   on_date: string | null;
   tolerance_minutes: number;
   requires_photo: boolean;

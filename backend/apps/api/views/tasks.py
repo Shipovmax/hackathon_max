@@ -2,6 +2,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from datetime import time
+
 from apps.core.models import TaskKind, TaskTemplate
 
 from ..presenters import template_item
@@ -24,6 +26,16 @@ DEFAULTS = {
 }
 
 
+# Насколько раньше планового времени задачу можно отметить, если окно не указали.
+DEFAULT_LEAD_MINUTES = 30
+
+
+def default_available_from(planned: time) -> time:
+    """Полчаса до планового времени, без перехода через полночь."""
+    minutes = planned.hour * 60 + planned.minute - DEFAULT_LEAD_MINUTES
+    return time.min if minutes <= 0 else time(minutes // 60, minutes % 60)
+
+
 def clean_template(values: dict) -> dict:
     """Validate a complete set of template fields, whether it comes from POST or from a merged PATCH."""
     kind = values.get("kind")
@@ -40,10 +52,19 @@ def clean_template(values: dict) -> dict:
     if kind == TaskKind.DAILY:
         on_date = None
 
+    planned_time = parse_time(values.get("planned_time"))
+    raw_available_from = values.get("available_from")
+    available_from = (
+        parse_time(raw_available_from) if raw_available_from else default_available_from(planned_time)
+    )
+    if available_from > planned_time:
+        raise bad_request("Отмечать можно начиная не позже планового времени")
+
     return {
         "title": clean_text(values.get("title"), "название задачи", 200),
         "kind": kind,
-        "planned_time": parse_time(values.get("planned_time")),
+        "planned_time": planned_time,
+        "available_from": available_from,
         "on_date": on_date,
         "tolerance_minutes": tolerance,
         "requires_photo": clean_bool(values.get("requires_photo"), "нужно фото"),
@@ -56,6 +77,7 @@ def current_values(template: TaskTemplate) -> dict:
         "title": template.title,
         "kind": template.kind,
         "planned_time": template.planned_time.strftime("%H:%M"),
+        "available_from": template.available_from.strftime("%H:%M"),
         "on_date": template.on_date.isoformat() if template.on_date else None,
         "tolerance_minutes": template.tolerance_minutes,
         "requires_photo": template.requires_photo,

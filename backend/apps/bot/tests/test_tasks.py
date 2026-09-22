@@ -476,6 +476,29 @@ class StatusHandlerTests(TestCase):
         with mock.patch("apps.bot.handlers.tasks.timezone.now", return_value=now):
             on_status(self.client, account or self.account)
 
+    def test_task_before_its_window_is_listed_without_a_button(self):
+        """
+        Закрытие смены в 22:00 не должно закрываться в 10:03.
+
+        Строка в списке остаётся, чтобы сотрудник видел, что его ждёт, но кнопки у неё
+        нет: нажать раньше времени нельзя.
+        """
+        self.make_instance(
+            "Evening count",
+            time(16),
+            requires_photo=False,
+            available_from=time(15, 30),
+        )
+
+        self.call()
+
+        message = self.client.sent[0]
+        self.assertIn("· 16:00 Evening count — отметить можно с 15:30", message["text"])
+        self.assertEqual(
+            [row[0]["text"] for row in message["buttons"]],
+            ["Выполнить · 10:00 Open store"],
+        )
+
     def test_lists_only_current_shift_tasks_with_computed_status_marks(self):
         completed = self.make_instance("Cleaning", time(9), requires_photo=False)
         mark_done(completed, self.employee, datetime(2026, 9, 21, 6, 1, tzinfo=timezone.utc))
