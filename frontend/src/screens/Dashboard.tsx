@@ -1,7 +1,7 @@
 import { CellList, CellSimple, IconButton, Typography } from '@maxhub/max-ui';
 import { useNavigate } from 'react-router-dom';
 
-import { useApi } from '../api/hooks';
+import { useApi, useReloadOnVisible } from '../api/hooks';
 import type { Dashboard as DashboardData } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
 import { Empty } from '../components/Empty';
@@ -15,13 +15,17 @@ export function Dashboard() {
   const navigate = useNavigate();
   const theme = useTheme();
   const state = useApi<DashboardData>('/dashboard/');
+  useReloadOnVisible(state.reload);
 
   return (
     <AsyncView state={state}>
       {(data) => {
-        const problems = data.stores.filter((store) => store.health !== 'ok');
-        const done = data.stores.reduce((sum, store) => sum + store.done, 0);
-        const total = data.stores.reduce((sum, store) => sum + store.total, 0);
+        const priority = { overdue: 0, unclaimed: 1, ok: 2 } as const;
+        const stores = [...data.stores].sort((left, right) => priority[left.health] - priority[right.health]);
+        const problems = stores.filter((store) => store.health !== 'ok');
+        const healthy = stores.length - problems.length;
+        const done = stores.reduce((sum, store) => sum + store.done, 0);
+        const total = stores.reduce((sum, store) => sum + store.total, 0);
 
         return (
           <Screen
@@ -55,7 +59,7 @@ export function Dashboard() {
                   <Typography.Title variant="small-strong">
                     {problems.length === 0
                       ? 'Все точки без замечаний'
-                      : `${problems.length} ${plural(problems.length, ['точка требует', 'точки требуют', 'точек требуют'])} внимания`}
+                      : `${healthy} из ${stores.length} ${plural(stores.length, ['точки', 'точек', 'точек'])} без замечаний`}
                   </Typography.Title>
                   <Typography.Body variant="small">
                     {total > 0
@@ -80,7 +84,7 @@ export function Dashboard() {
 
             {data.stores.length > 0 && (
               <CellList mode="island">
-                {data.stores.map((store) => (
+                {stores.map((store) => (
                   <CellSimple
                     key={store.id}
                     before={<StatusDot tone={healthTone(store.health)} />}

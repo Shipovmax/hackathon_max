@@ -2,21 +2,22 @@ import { CellList, CellSimple, Typography } from '@maxhub/max-ui';
 import { Fragment, useCallback, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
-import { useApi } from '../api/hooks';
+import { useApi, useReloadOnVisible } from '../api/hooks';
 import type { DayTask, StoreDay as StoreDayData } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
 import { Empty } from '../components/Empty';
 import { DateNav } from '../components/DateNav';
 import { PhotoView } from '../components/PhotoView';
 import { Screen } from '../components/Screen';
-import { StatusDot, TaskStatusBadge, taskTone } from '../components/StatusBadge';
-import { formatRange, minutesOf, today } from '../lib/format';
+import { Progress, StatusDot, TaskStatusBadge, taskTone } from '../components/StatusBadge';
+import { formatRange, minutesOf, plural, today } from '../lib/format';
 
 // Плановое время стоит слева, поэтому в подписи только то, что произошло.
 function subtitle(task: DayTask): string {
+  const photo = task.photo_url ? ' · есть фото' : '';
   if (task.done_by && task.done_at) {
     const late = task.late_minutes ? `, с опозданием на ${task.late_minutes} мин` : '';
-    return `Отметил ${task.done_by} в ${task.done_at}${late}`;
+    return `Отметил ${task.done_by} в ${task.done_at}${late}${photo}`;
   }
   if (task.claimed_by) return `Принимает ${task.claimed_by}`;
   if (task.status === 'unclaimed') return 'Задачу никто не взял';
@@ -37,6 +38,7 @@ export function StoreDay() {
   );
   const [photo, setPhoto] = useState<DayTask | null>(null);
   const state = useApi<StoreDayData>(`/stores/${storeId}/day/?date=${date}`);
+  useReloadOnVisible(state.reload);
 
   // Черта «сейчас» показывает, что уже должно было произойти, а что впереди.
   const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
@@ -44,76 +46,106 @@ export function StoreDay() {
   return (
     <AsyncView state={state}>
       {(data) => {
+        const completed = data.tasks.filter((task) => task.status === 'done_on_time' || task.status === 'done_late').length;
+        const problems = data.tasks.filter((task) =>
+          task.status === 'overdue' || task.status === 'unclaimed' || task.status === 'missed',
+        );
         const upcoming = data.tasks.findIndex((task) => minutesOf(task.planned_time) > nowMinutes);
         // Все задачи дня позади — черта уходит под список.
         const nowIndex = date !== today() ? -1 : upcoming === -1 ? data.tasks.length : upcoming;
         return (
-        <Screen
-          title={data.store.name}
-          subtitle={
-            data.on_shift.length
-              ? `На смене: ${data.on_shift.map((s) => `${s.name} ${formatRange(s.start, s.end)}`).join(', ')}`
-              : 'Никого на смене'
-          }
-          back
-          backTo="/"
-        >
-          <div className="screen__block">
-            <DateNav date={date} onChange={setDate} />
-          </div>
-
-          <div className="screen__block" aria-live="polite">
-            {state.loading && (
-              <Typography.Label variant="small" className="muted">
-                Обновляем…
-              </Typography.Label>
-            )}
-          </div>
-
-          {data.tasks.length === 0 ? (
+          <Screen
+            title={data.store.name}
+            subtitle={
+              data.on_shift.length
+                ? `На смене: ${data.on_shift.map((s) => `${s.name} ${formatRange(s.start, s.end)}`).join(', ')}`
+                : 'Никого на смене'
+            }
+            back
+            backTo="/"
+          >
             <div className="screen__block">
-              <Empty
-                icon="clock"
-                title="Задач на этот день нет"
-                text="Задачи точки задаются шаблонами: ежедневные повторяются, разовая ставится на дату."
-                action={{ label: 'Задачи точки', onClick: () => navigate(`/stores/${data.store.id}/tasks`) }}
-              />
+              <DateNav date={date} onChange={setDate} />
             </div>
-          ) : (
-            <CellList mode="island" className="timeline__list">
-              {data.tasks.map((task, index) => (
-                <Fragment key={task.id}>
-                  {nowIndex === index && <NowMarker />}
-                  <CellSimple
-                    title={task.title}
-                    subtitle={subtitle(task)}
-                    after={<TaskStatusBadge status={task.status} lateMinutes={task.late_minutes} />}
-                    before={
-                      <span className="timeline">
-                        <span className="timeline__time">{task.planned_time}</span>
-                        <StatusDot tone={taskTone(task.status)} />
-                      </span>
-                    }
-                    showChevron={Boolean(task.photo_url)}
-                    onClick={task.photo_url ? () => setPhoto(task) : undefined}
-                  />
-                </Fragment>
-              ))}
-              {nowIndex === data.tasks.length && <NowMarker />}
+
+            {data.tasks.length > 0 && (
+              <div className="screen__block">
+                <div className={`summary summary--${problems.length > 0 ? 'bad' : 'ok'}`}>
+                  <Typography.Title variant="small-strong">
+                    {problems.length > 0
+                      ? `${problems.length} ${plural(problems.length, ['задача требует', 'задачи требуют', 'задач требуют'])} внимания`
+                      : date === today()
+                        ? 'Смена идёт без замечаний'
+                        : 'День прошёл без замечаний'}
+                  </Typography.Title>
+                  <Typography.Body variant="small">
+                    Выполнено {completed} из {data.tasks.length}
+                  </Typography.Body>
+                  <Progress done={completed} total={data.tasks.length} tone={problems.length > 0 ? 'warn' : 'ok'} />
+                </div>
+              </div>
+            )}
+
+            <div className="screen__block" aria-live="polite">
+              {state.loading && (
+                <Typography.Label variant="small" className="muted">
+                  Обновляем…
+                </Typography.Label>
+              )}
+            </div>
+
+            {data.tasks.length === 0 ? (
+              <div className="screen__block">
+                <Empty
+                  icon="clock"
+                  title="Задач на этот день нет"
+                  text="Задачи точки задаются шаблонами: ежедневные повторяются, разовая ставится на дату."
+                  action={{ label: 'Задачи точки', onClick: () => navigate(`/stores/${data.store.id}/tasks`) }}
+                />
+              </div>
+            ) : (
+              <CellList mode="island" className="timeline__list">
+                {data.tasks.map((task, index) => (
+                  <Fragment key={task.id}>
+                    {nowIndex === index && <NowMarker />}
+                    <CellSimple
+                      title={task.title}
+                      subtitle={subtitle(task)}
+                      after={<TaskStatusBadge status={task.status} lateMinutes={task.late_minutes} />}
+                      before={
+                        <span className="timeline">
+                          <span className="timeline__time">{task.planned_time}</span>
+                          <StatusDot tone={taskTone(task.status)} />
+                        </span>
+                      }
+                      showChevron={Boolean(task.photo_url)}
+                      onClick={task.photo_url ? () => setPhoto(task) : undefined}
+                    />
+                  </Fragment>
+                ))}
+                {nowIndex === data.tasks.length && <NowMarker />}
+              </CellList>
+            )}
+
+            <CellList mode="island">
+              <CellSimple
+                title="График смен"
+                showChevron
+                onClick={() => navigate(`/stores/${data.store.id}/schedule`)}
+              />
+              <CellSimple
+                title="Задачи точки"
+                showChevron
+                onClick={() => navigate(`/stores/${data.store.id}/tasks`)}
+              />
             </CellList>
-          )}
 
-          <CellList mode="island">
-            <CellSimple title="График смен" showChevron onClick={() => navigate(`/stores/${data.store.id}/schedule`)} />
-            <CellSimple title="Задачи точки" showChevron onClick={() => navigate(`/stores/${data.store.id}/tasks`)} />
-          </CellList>
-
-          <PhotoView
-            url={photo?.photo_url ?? null}
-            title={photo ? `${photo.title} · ${photo.done_by ?? ''} ${photo.done_at ?? ''}`.trim() : ''}
-            onClose={() => setPhoto(null)}
-          />
-        </Screen>
+            <PhotoView
+              url={photo?.photo_url ?? null}
+              title={photo ? `${photo.title} · ${photo.done_by ?? ''} ${photo.done_at ?? ''}`.trim() : ''}
+              onClose={() => setPhoto(null)}
+            />
+          </Screen>
         );
       }}
     </AsyncView>

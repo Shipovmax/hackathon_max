@@ -11,7 +11,7 @@ interface ErrorNoteProps {
 export function ErrorNote({ error, onRetry }: ErrorNoteProps) {
   if (!error) return null;
   return (
-    <div className="alert alert--bad">
+    <div className="alert alert--bad" role="alert">
       <Typography.Body variant="medium">{describeError(error)}</Typography.Body>
       {onRetry && (
         <Button size="small" variant="secondary" onClick={onRetry}>

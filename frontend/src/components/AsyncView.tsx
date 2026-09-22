@@ -31,5 +31,17 @@ export function AsyncView<T>({ state, children }: AsyncViewProps<T>) {
       </div>
     );
   }
-  return <>{children(state.data)}</>;
+  return (
+    <>
+      {state.error && (
+        <div className="refresh-note" role="alert">
+          <Typography.Label variant="small">{describeError(state.error)}</Typography.Label>
+          <Button size="small" variant="secondary" onClick={state.reload} loading={state.loading}>
+            Повторить
+          </Button>
+        </div>
+      )}
+      {children(state.data)}
+    </>
+  );
 }

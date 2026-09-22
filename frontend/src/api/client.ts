@@ -3,8 +3,19 @@ import { ApiError } from './errors';
 import { mockRequest } from './mocks';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === '1';
+const REQUEST_TIMEOUT_MS = 15_000;
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
   if (USE_MOCKS) return mockRequest<T>(method, path, body);
@@ -14,14 +25,15 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
 
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, {
+    response = await fetchWithTimeout(`/api${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-  } catch {
+  } catch (failure) {
     // Обрыв связи: фетч не дошёл до сервера, статуса нет.
-    throw new ApiError(0, 'network', 'нет связи с сервером');
+    const timedOut = failure instanceof DOMException && failure.name === 'AbortError';
+    throw new ApiError(0, timedOut ? 'timeout' : 'network', timedOut ? 'сервер не ответил вовремя' : 'нет связи с сервером');
   }
 
   if (!response.ok) {
@@ -47,9 +59,10 @@ export async function apiBlobUrl(path: string): Promise<string> {
 
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, { headers: { 'X-Max-Init-Data': getInitData() } });
-  } catch {
-    throw new ApiError(0, 'network', 'нет связи с сервером');
+    response = await fetchWithTimeout(`/api${path}`, { headers: { 'X-Max-Init-Data': getInitData() } });
+  } catch (failure) {
+    const timedOut = failure instanceof DOMException && failure.name === 'AbortError';
+    throw new ApiError(0, timedOut ? 'timeout' : 'network', timedOut ? 'сервер не ответил вовремя' : 'нет связи с сервером');
   }
   if (!response.ok) throw new ApiError(response.status, '', response.statusText);
   return URL.createObjectURL(await response.blob());

@@ -11,19 +11,24 @@ interface ScreenProps {
   back?: boolean;
   backTo?: string;
   action?: ReactNode;
+  leaveWarning?: string;
   children: ReactNode;
 }
 
-export function Screen({ title, subtitle, back, backTo = '/', action, children }: ScreenProps) {
+export function Screen({ title, subtitle, back, backTo = '/', action, leaveWarning, children }: ScreenProps) {
   const navigate = useNavigate();
+  const canLeave = useCallback(() => !leaveWarning || window.confirm(leaveWarning), [leaveWarning]);
   const goBack = useCallback(() => {
+    if (!canLeave()) return;
     // При обычном переходе возвращаем туда, откуда пришли. При прямом входе по
     // диплинку истории нет — тогда ведём на предсказуемый родительский экран.
     const historyIndex = window.history.state?.idx;
     if (typeof historyIndex === 'number' && historyIndex > 0) navigate(-1);
     else navigate(backTo, { replace: true });
-  }, [backTo, navigate]);
-  const goHome = useCallback(() => navigate('/'), [navigate]);
+  }, [backTo, canLeave, navigate]);
+  const goHome = useCallback(() => {
+    if (canLeave()) navigate('/');
+  }, [canLeave, navigate]);
   useBackButton(back ? goBack : null);
 
   return (

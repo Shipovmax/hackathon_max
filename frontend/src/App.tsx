@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { useApi } from './api/hooks';
 import type { Me } from './api/types';
+import { NetworkStatus } from './components/NetworkStatus';
 import { ToastProvider } from './components/Toast';
 import { AccessProblem } from './screens/AccessProblem';
 import { Dashboard } from './screens/Dashboard';
@@ -29,6 +30,7 @@ export function App() {
 
   return (
     <ToastProvider>
+      <NetworkStatus />
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/stores/:storeId" element={<StoreDay />} />

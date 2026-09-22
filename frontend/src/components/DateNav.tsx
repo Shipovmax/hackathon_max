@@ -18,7 +18,16 @@ export function DateNav({ date, onChange, maxDate = today() }: DateNavProps) {
       <IconButton size="small" variant="secondary" aria-label="Предыдущий день" onClick={() => onChange(addDays(date, -1))}>
         <Icon name="back" />
       </IconButton>
-      <Typography.Body variant="medium-strong">{label}</Typography.Body>
+      <button
+        type="button"
+        className="datenav__current"
+        disabled={date === today()}
+        aria-label={date === today() ? label : `${label}. Вернуться к сегодняшнему дню`}
+        onClick={() => onChange(today())}
+      >
+        <Typography.Body variant="medium-strong">{label}</Typography.Body>
+        {date !== today() && <span className="datenav__today">К сегодня</span>}
+      </button>
       <IconButton
         size="small"
         variant="secondary"

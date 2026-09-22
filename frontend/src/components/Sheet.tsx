@@ -1,5 +1,5 @@
 import { IconButton, Typography } from '@maxhub/max-ui';
-import { type ReactNode, useCallback, useEffect, useRef } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useBackButton } from '../max/bridge';
@@ -10,12 +10,14 @@ interface SheetProps {
   open: boolean;
   onClose: () => void;
   children: ReactNode;
+  actions?: ReactNode;
 }
 
 /** Форма поверх экрана: в MAX UI 0.5.0 своего модального окна нет. */
-export function Sheet({ title, open, onClose, children }: SheetProps) {
+export function Sheet({ title, open, onClose, children, actions }: SheetProps) {
   const close = useCallback(() => onClose(), [onClose]);
   const dialog = useRef<HTMLDivElement>(null);
+  const titleId = useId();
   useBackButton(open ? close : null);
 
   useEffect(() => {
@@ -37,10 +39,10 @@ export function Sheet({ title, open, onClose, children }: SheetProps) {
       if (focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog.current?.contains(document.activeElement))) {
         event.preventDefault();
         first.focus();
       }
@@ -60,6 +62,29 @@ export function Sheet({ title, open, onClose, children }: SheetProps) {
     };
   }, [open, close]);
 
+  useEffect(() => {
+    if (!open) return;
+    const viewport = window.visualViewport;
+    const syncViewport = () => {
+      document.documentElement.style.setProperty(
+        '--visual-viewport-height',
+        `${Math.round(viewport?.height ?? window.innerHeight)}px`,
+      );
+      document.documentElement.style.setProperty('--visual-viewport-top', `${Math.round(viewport?.offsetTop ?? 0)}px`);
+    };
+    syncViewport();
+    viewport?.addEventListener('resize', syncViewport);
+    viewport?.addEventListener('scroll', syncViewport);
+    window.addEventListener('resize', syncViewport);
+    return () => {
+      viewport?.removeEventListener('resize', syncViewport);
+      viewport?.removeEventListener('scroll', syncViewport);
+      window.removeEventListener('resize', syncViewport);
+      document.documentElement.style.removeProperty('--visual-viewport-height');
+      document.documentElement.style.removeProperty('--visual-viewport-top');
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const portalRoot = document.querySelector<HTMLElement>('.app-root') ?? document.body;
@@ -72,16 +97,21 @@ export function Sheet({ title, open, onClose, children }: SheetProps) {
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         tabIndex={-1}
       >
         <div className="sheet__header">
-          <Typography.Title variant="small-strong">{title}</Typography.Title>
+          <div id={titleId} className="sheet__title">
+            <Typography.Title variant="small-strong">{title}</Typography.Title>
+          </div>
           <IconButton size="small" variant="ghost" onClick={close} aria-label="Закрыть">
             <Icon name="close" />
           </IconButton>
         </div>
-        <div className="sheet__body">{children}</div>
+        <div className="sheet__body">
+          {children}
+          {actions && <div className="sheet__actions">{actions}</div>}
+        </div>
       </div>
     </div>,
     portalRoot,

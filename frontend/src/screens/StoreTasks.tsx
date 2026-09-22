@@ -61,31 +61,31 @@ export function StoreTasks() {
           )}
 
           {daily.length > 0 && (
-          <CellList mode="island" header={<CellHeader>Каждый день</CellHeader>}>
-            {daily.map((task) => (
-              <CellSimple
-                key={task.id}
-                title={task.title}
-                subtitle={describe(task)}
-                showChevron
-                onClick={() => setEditing(task)}
-              />
-            ))}
-          </CellList>
+            <CellList mode="island" header={<CellHeader>Каждый день</CellHeader>}>
+              {daily.map((task) => (
+                <CellSimple
+                  key={task.id}
+                  title={task.title}
+                  subtitle={describe(task)}
+                  showChevron
+                  onClick={() => setEditing(task)}
+                />
+              ))}
+            </CellList>
           )}
 
           {once.length > 0 && (
-          <CellList mode="island" header={<CellHeader>Разовые задачи</CellHeader>}>
-            {once.map((task) => (
-              <CellSimple
-                key={task.id}
-                title={task.title}
-                subtitle={describe(task)}
-                showChevron
-                onClick={() => setEditing(task)}
-              />
-            ))}
-          </CellList>
+            <CellList mode="island" header={<CellHeader>Разовые задачи</CellHeader>}>
+              {once.map((task) => (
+                <CellSimple
+                  key={task.id}
+                  title={task.title}
+                  subtitle={describe(task)}
+                  showChevron
+                  onClick={() => setEditing(task)}
+                />
+              ))}
+            </CellList>
           )}
 
           <div className="screen__block">
@@ -140,7 +140,12 @@ function TaskEditor({ storeId, task, onClose, onDone }: TaskEditorProps) {
 
   if (!task || !form) return null;
   const existing = 'id' in task ? task : null;
-  const patch = (fields: Partial<TaskTemplateInput>) => setForm({ ...form, ...fields });
+  const patch = (fields: Partial<TaskTemplateInput>) => {
+    setForm({ ...form, ...fields });
+    setProblem(null);
+    save.reset();
+    remove.reset();
+  };
 
   const submit = async () => {
     if (form.title.trim().length < 2) {
@@ -153,6 +158,10 @@ function TaskEditor({ storeId, task, onClose, onDone }: TaskEditorProps) {
     }
     if (form.kind === 'one_time' && !form.on_date) {
       setProblem('Укажите дату разовой задачи');
+      return;
+    }
+    if (!existing && form.kind === 'one_time' && form.on_date && form.on_date < today()) {
+      setProblem('Дата разовой задачи не может быть в прошлом');
       return;
     }
     const body = { ...form, title: form.title.trim() };
@@ -175,7 +184,28 @@ function TaskEditor({ storeId, task, onClose, onDone }: TaskEditorProps) {
   };
 
   return (
-    <Sheet title={existing ? 'Задача точки' : form.kind === 'daily' ? 'Новая ежедневная задача' : 'Новая разовая задача'} open onClose={onClose}>
+    <Sheet
+      title={existing ? 'Задача точки' : form.kind === 'daily' ? 'Новая ежедневная задача' : 'Новая разовая задача'}
+      open
+      onClose={onClose}
+      actions={
+        <>
+          <Button stretched loading={save.running} onClick={submit}>
+            {existing ? 'Сохранить' : 'Добавить'}
+          </Button>
+          {existing &&
+            (confirmDelete ? (
+              <Button variant="destructive" stretched loading={remove.running} onClick={submitDelete}>
+                Точно удалить задачу
+              </Button>
+            ) : (
+              <Button variant="secondary" stretched onClick={() => setConfirmDelete(true)}>
+                Удалить задачу
+              </Button>
+            ))}
+        </>
+      }
+    >
       <TextField label="Название" value={form.title} onChange={(title) => patch({ title })} placeholder="Открытие магазина" />
       <TimeField label="Плановое время" value={form.planned_time} onChange={(planned_time) => patch({ planned_time })} />
       {form.kind === 'one_time' && (
@@ -184,6 +214,9 @@ function TaskEditor({ storeId, task, onClose, onDone }: TaskEditorProps) {
           <input
             className="field__date"
             type="date"
+            lang="ru"
+            aria-label="Дата разовой задачи"
+            min={existing ? undefined : today()}
             value={form.on_date ?? ''}
             onChange={(event) => patch({ on_date: event.target.value })}
           />
@@ -208,22 +241,8 @@ function TaskEditor({ storeId, task, onClose, onDone }: TaskEditorProps) {
         onChange={(requires_claim) => patch({ requires_claim })}
       />
 
-      {problem && <div className="alert alert--bad">{problem}</div>}
+      {problem && <div className="alert alert--bad" role="alert">{problem}</div>}
       <ErrorNote error={save.error ?? remove.error} />
-
-      <Button stretched loading={save.running} onClick={submit}>
-        {existing ? 'Сохранить' : 'Добавить'}
-      </Button>
-      {existing &&
-        (confirmDelete ? (
-          <Button variant="destructive" stretched loading={remove.running} onClick={submitDelete}>
-            Точно удалить задачу
-          </Button>
-        ) : (
-          <Button variant="secondary" stretched onClick={() => setConfirmDelete(true)}>
-            Удалить задачу
-          </Button>
-        ))}
     </Sheet>
   );
 }

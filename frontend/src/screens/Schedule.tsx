@@ -89,6 +89,16 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
     setDirty(false);
   }, [data]);
 
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
   const days = useMemo(
     () =>
       WEEKDAYS.map((label, index) => ({
@@ -140,7 +150,6 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
     const result = await check.run(() => apiPost<Coverage>(`/stores/${storeId}/schedule/coverage/`, draft));
     if (!result) return;
     setServerGaps(result.gaps);
-    setDirty(false);
     toast.show(result.gaps.length === 0 ? 'Окон нет, неделя закрыта' : `Найдено окон: ${result.gaps.length}`, result.gaps.length === 0 ? 'ok' : 'bad');
   };
 
@@ -160,6 +169,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
       subtitle={`${formatWeekRange(data.week_start)} · ${data.status === 'draft' ? 'черновик' : 'опубликован'}`}
       back
       backTo={`/stores/${storeId}`}
+      leaveWarning={dirty ? 'Изменения графика не сохранены. Уйти с экрана?' : undefined}
     >
       <div className="screen__block">
         <div className="datenav">
@@ -196,44 +206,55 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
             text="Пока некому ставить смены. Добавьте людей на экране «Точки и сотрудники»."
           />
         ) : (
-          <div className="schedule__scroll">
-            <table className="schedule">
-              <thead>
-                <tr>
-                  <th />
-                  {days.map((day) => (
-                    <th key={day.date} className={cellClass(day.date, day.weekend)}>
-                      <span className="schedule__day">{day.label}</span>
-                      <span className="schedule__date">{Number(day.date.slice(8))}</span>
+          <>
+            <Typography.Label variant="small" className="schedule__hint">
+              Таблица прокручивается по горизонтали. Имена сотрудников остаются слева.
+            </Typography.Label>
+            <div className="schedule__scroll" tabIndex={0} aria-label="График смен, прокручиваемая таблица">
+              <table className="schedule">
+                <caption className="visually-hidden">Смены сотрудников по дням недели</caption>
+                <thead>
+                  <tr>
+                    <th className="schedule__corner" scope="col">
+                      Сотрудник
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.employees.map((employee) => (
-                  <tr key={employee.id}>
-                    <td className="schedule__name">
-                      <Typography.Body variant="small-strong">{employee.name}</Typography.Body>
-                    </td>
-                    {days.map((day) => {
-                      const shift = shifts.find((item) => item.employee_id === employee.id && item.date === day.date);
-                      return (
-                        <td key={day.date} className={cellClass(day.date, day.weekend)}>
-                          <button
-                            type="button"
-                            className={`schedule__cell${shift ? ' schedule__cell--filled' : ''}`}
-                            onClick={() => openEditor(employee.id, employee.name, day.date)}
-                          >
-                            {shift ? formatRange(shift.start, shift.end) : '—'}
-                          </button>
-                        </td>
-                      );
-                    })}
+                    {days.map((day) => (
+                      <th key={day.date} className={cellClass(day.date, day.weekend)}>
+                        <span className="schedule__day">{day.label}</span>
+                        <span className="schedule__date">{Number(day.date.slice(8))}</span>
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {data.employees.map((employee) => (
+                    <tr key={employee.id}>
+                      <th className="schedule__name" scope="row">
+                        <Typography.Body variant="small-strong">{employee.name}</Typography.Body>
+                      </th>
+                      {days.map((day) => {
+                        const shift = shifts.find(
+                          (item) => item.employee_id === employee.id && item.date === day.date,
+                        );
+                        return (
+                          <td key={day.date} className={cellClass(day.date, day.weekend)}>
+                            <button
+                              type="button"
+                              className={`schedule__cell${shift ? ' schedule__cell--filled' : ''}`}
+                              aria-label={`${employee.name}, ${formatDayLabel(day.date)}: ${shift ? formatRange(shift.start, shift.end) : 'выходной'}`}
+                              onClick={() => openEditor(employee.id, employee.name, day.date)}
+                            >
+                              {shift ? formatRange(shift.start, shift.end) : '—'}
+                            </button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
         {data.employees.length > 0 && (
@@ -258,8 +279,8 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
         {dirty && (
           <div className="alert">
             <Typography.Body variant="medium">
-              Правки пока только на экране. {data.status === 'draft' ? 'Опубликуйте' : 'Сохраните'} их, чтобы график
-              увидели сотрудники.
+              Правки пока только на экране. {data.status === 'draft' ? 'Сохраните черновик или опубликуйте график' : 'Сохраните их'}, чтобы
+              изменения не потерялись.
             </Typography.Body>
           </div>
         )}
@@ -270,14 +291,30 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
           Проверить покрытие
         </Button>
         {data.status === 'draft' ? (
-          <Button
-            stretched
-            loading={save.running}
-            disabled={data.employees.length === 0}
-            onClick={() => runSave(true)}
-          >
-            Опубликовать
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              stretched
+              loading={save.running}
+              disabled={!dirty}
+              onClick={() => runSave(false)}
+            >
+              Сохранить черновик
+            </Button>
+            <Button
+              stretched
+              loading={save.running}
+              disabled={data.employees.length === 0 || gaps.length > 0}
+              onClick={() => runSave(true)}
+            >
+              Опубликовать
+            </Button>
+            {gaps.length > 0 && (
+              <Typography.Label variant="small" className="muted">
+                Перед публикацией закройте все окна в графике.
+              </Typography.Label>
+            )}
+          </>
         ) : (
           <Button stretched loading={save.running} disabled={!dirty} onClick={() => runSave(false)}>
             Сохранить изменения
@@ -366,6 +403,15 @@ function ShiftEditor({ state, onClose, onApply, onClear }: ShiftEditorProps) {
 
   if (!state) return null;
 
+  const changeStart = (value: string) => {
+    setStart(value);
+    setProblem(null);
+  };
+  const changeEnd = (value: string) => {
+    setEnd(value);
+    setProblem(null);
+  };
+
   const submit = () => {
     if (!isValidTime(start) || !isValidTime(end)) {
       setProblem('Время в формате ЧЧ:ММ, например 09:00');
@@ -379,18 +425,26 @@ function ShiftEditor({ state, onClose, onApply, onClear }: ShiftEditorProps) {
   };
 
   return (
-    <Sheet title={`${state.employeeName} · ${formatDayLabel(state.date)}`} open onClose={onClose}>
-      <TimeField label="Начало" value={start} onChange={setStart} />
-      <TimeField label="Конец" value={end} onChange={setEnd} />
-      {problem && <div className="alert alert--bad">{problem}</div>}
-      <Button stretched onClick={submit}>
-        Сохранить смену
-      </Button>
-      {state.existing && (
-        <Button variant="secondary" stretched onClick={() => onClear(state)}>
-          Сделать выходным
-        </Button>
-      )}
+    <Sheet
+      title={`${state.employeeName} · ${formatDayLabel(state.date)}`}
+      open
+      onClose={onClose}
+      actions={
+        <>
+          <Button stretched onClick={submit}>
+            Сохранить смену
+          </Button>
+          {state.existing && (
+            <Button variant="secondary" stretched onClick={() => onClear(state)}>
+              Сделать выходным
+            </Button>
+          )}
+        </>
+      }
+    >
+      <TimeField label="Начало" value={start} onChange={changeStart} />
+      <TimeField label="Конец" value={end} onChange={changeEnd} />
+      {problem && <div className="alert alert--bad" role="alert">{problem}</div>}
     </Sheet>
   );
 }
