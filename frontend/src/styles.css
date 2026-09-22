@@ -115,6 +115,7 @@ body {
   min-width: 320px;
   min-height: 100%;
   margin: 0;
+  overflow-x: hidden;
   color: var(--ink);
   font-family: var(--app-font);
   background: var(--surface);
@@ -673,6 +674,18 @@ select {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/*
+ * Нативные поля iOS и обёртка Input из MAX UI имеют собственную минимальную
+ * ширину. В узком WebView она не должна раздвигать форму и весь документ.
+ */
+.field > * {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .field--row {
@@ -873,7 +886,8 @@ select {
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  opacity: 0.75;
+  color: var(--ink);
+  opacity: 0.72;
 }
 
 /* Форма поверх экрана ---------------------------------------------------- */
@@ -896,6 +910,7 @@ select {
   width: 100%;
   max-width: 520px;
   max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 12px);
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 8px 18px calc(18px + env(safe-area-inset-bottom, 0px));
@@ -936,6 +951,13 @@ select {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
+}
+
+.sheet__body > * {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Фото отметки ----------------------------------------------------------- */
