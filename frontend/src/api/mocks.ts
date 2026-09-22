@@ -376,6 +376,15 @@ const routes: [string, RegExp, Handler][] = [
     employee.invite_code = null;
     return employee;
   }],
+  ['DELETE', /^\/employees\/(\d+)\/$/, (p) => {
+    const [item, employee] = storeOfEmployee(Number(p[0]));
+    if (employee.status !== 'dismissed') {
+      throw new ApiError(409, 'conflict', 'Сначала отметьте, что сотрудник уволен');
+    }
+    // На сервере запись с историей остаётся ради отметок, но из списка пропадает так же.
+    item.employees = item.employees.filter((person) => person.id !== employee.id);
+    return null;
+  }],
   ['PATCH', /^\/task-templates\/(\d+)\/$/, (p, _q, body) => {
     const id = Number(p[0]);
     for (const list of Object.values(db.templates)) {

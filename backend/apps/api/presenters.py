@@ -30,8 +30,10 @@ def person(employee: Employee) -> dict:
 
 
 def store_with_people(store: Store) -> dict:
+    # Убранных из списка не показываем: их держит только история отметок.
     employees = sorted(
-        store.employees.all(), key=lambda e: (e.status == EmployeeStatus.DISMISSED, e.name)
+        (e for e in store.employees.all() if e.status != EmployeeStatus.REMOVED),
+        key=lambda e: (e.status == EmployeeStatus.DISMISSED, e.name),
     )
     return {
         "id": store.id,

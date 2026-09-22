@@ -9,6 +9,9 @@ from .network import Store
 class EmployeeStatus(models.TextChoices):
     ACTIVE = "active", "Активен"
     DISMISSED = "dismissed", "Уволен"
+    # Убран из списка владельцем. Запись остаётся, потому что на неё ссылаются отметки:
+    # в истории задач должно быть видно, кто их закрыл.
+    REMOVED = "removed", "Убран из списка"
 
 
 class Employee(models.Model):

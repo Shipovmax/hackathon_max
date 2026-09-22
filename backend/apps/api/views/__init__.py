@@ -3,6 +3,7 @@ from .dashboard import DashboardView, StoreDayView
 from .photos import CompletionPhotoView
 from .schedule import CoverageView, PublishView, ScheduleView
 from .stores import (
+    EmployeeDeleteView,
     EmployeeDismissView,
     EmployeeInviteView,
     StoreEmployeesView,
@@ -14,6 +15,7 @@ __all__ = [
     "CompletionPhotoView",
     "CoverageView",
     "DashboardView",
+    "EmployeeDeleteView",
     "EmployeeDismissView",
     "EmployeeInviteView",
     "HealthView",

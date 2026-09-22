@@ -1,7 +1,7 @@
 import { Button, CellHeader, CellList, CellSimple, Typography } from '@maxhub/max-ui';
 import { useState } from 'react';
 
-import { apiPost } from '../api/client';
+import { apiDelete, apiPost } from '../api/client';
 import { useAction, useApi } from '../api/hooks';
 import type { Person, StoreInput, StoreWithPeople } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
@@ -186,7 +186,9 @@ function PersonCard({
   const toast = useToast();
   const invite = useAction();
   const dismiss = useAction();
+  const remove = useAction();
   const [confirm, setConfirm] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [code, setCode] = useState<string | null>(null);
 
   if (!data) return null;
@@ -215,8 +217,24 @@ function PersonCard({
     onDone();
   };
 
+  const runRemove = async () => {
+    const result = await remove.run(() => apiDelete(`/employees/${person.id}/`));
+    if (result === undefined) return;
+    toast.show('Сотрудник убран из списка');
+    onDone();
+  };
+
   return (
-    <Sheet title={person.name} open onClose={() => { setCode(null); setConfirm(false); onClose(); }}>
+    <Sheet
+      title={person.name}
+      open
+      onClose={() => {
+        setCode(null);
+        setConfirm(false);
+        setConfirmRemove(false);
+        onClose();
+      }}
+    >
       <Typography.Body variant="medium">
         {person.status === 'connected'
           ? 'Аккаунт MAX привязан, бот шлёт задачи.'
@@ -234,7 +252,7 @@ function PersonCard({
         </button>
       )}
 
-      <ErrorNote error={invite.error ?? dismiss.error} />
+      <ErrorNote error={invite.error ?? dismiss.error ?? remove.error} />
 
       {person.status !== 'dismissed' && (
         <>
@@ -252,6 +270,17 @@ function PersonCard({
           )}
         </>
       )}
+
+      {person.status === 'dismissed' &&
+        (confirmRemove ? (
+          <Button variant="destructive" stretched loading={remove.running} onClick={runRemove}>
+            Точно убрать из списка
+          </Button>
+        ) : (
+          <Button variant="secondary" stretched onClick={() => setConfirmRemove(true)}>
+            Убрать из списка
+          </Button>
+        ))}
     </Sheet>
   );
 }

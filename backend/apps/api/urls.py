@@ -33,6 +33,7 @@ urlpatterns = [
     ),
     path("employees/<int:employee_id>/invite/", views.EmployeeInviteView.as_view(), name="employee-invite"),
     path("employees/<int:employee_id>/dismiss/", views.EmployeeDismissView.as_view(), name="employee-dismiss"),
+    path("employees/<int:employee_id>/", views.EmployeeDeleteView.as_view(), name="employee-delete"),
     path(
         "task-templates/<int:template_id>/",
         views.TaskTemplateDetailView.as_view(),

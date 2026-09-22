@@ -1,14 +1,18 @@
 import datetime as dt
 
 from apps.core.models import (
+    Completion,
     Employee,
     InviteCode,
     MaxAccount,
     Shift,
     ShiftStatus,
     Store,
+    TaskInstance,
     TaskTemplate,
 )
+
+from apps.core.tests.helpers import moscow
 
 from .helpers import OwnerApiTestCase
 
@@ -102,6 +106,88 @@ class EmployeeTests(OwnerApiTestCase):
         foreign = Employee.objects.create(store=self.other_owner(), name="Oleg")
         self.assertEqual(self.call("post", f"/employees/{foreign.id}/dismiss/").status_code, 404)
         self.assertEqual(self.call("post", f"/employees/{foreign.id}/invite/").status_code, 404)
+        self.assertEqual(self.call("delete", f"/employees/{foreign.id}/").status_code, 404)
+
+
+class EmployeeRemovalTests(OwnerApiTestCase):
+    """Убрать уволенного из списка, не потеряв историю его отметок."""
+
+    def names(self):
+        return [p["name"] for p in self.call("get", "/stores/").json()[0]["employees"]]
+
+    def dismiss(self, employee):
+        self.assertEqual(self.call("post", f"/employees/{employee.id}/dismiss/").status_code, 200)
+
+    def test_employee_who_never_worked_is_deleted_outright(self):
+        InviteCode.issue(self.anna)
+        self.dismiss(self.anna)
+
+        response = self.call("delete", f"/employees/{self.anna.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Employee.objects.filter(pk=self.anna.id).exists())
+        self.assertEqual(InviteCode.objects.filter(employee_id=self.anna.id).count(), 0)
+        self.assertEqual(self.names(), ["Igor"])
+
+    def test_employee_with_history_disappears_from_the_list_but_keeps_it(self):
+        template = TaskTemplate.objects.create(
+            store=self.store, title="Opening", planned_time=dt.time(9), available_from=dt.time(9)
+        )
+        instance = TaskInstance.objects.create(template=template, date=MONDAY)
+        completion = Completion.objects.create(
+            instance=instance, employee=self.anna, completed_at=moscow(9, 3, MONDAY)
+        )
+        self.dismiss(self.anna)
+
+        response = self.call("delete", f"/employees/{self.anna.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.names(), ["Igor"])
+        # Запись и отметка целы: в карточке дня видно, кто закрыл задачу.
+        self.anna.refresh_from_db()
+        self.assertEqual(self.anna.status, "removed")
+        completion.refresh_from_db()
+        self.assertEqual(completion.employee_id, self.anna.id)
+
+    def test_employee_with_shifts_is_kept_too(self):
+        Shift.objects.create(
+            employee=self.anna,
+            store=self.store,
+            date=MONDAY,
+            start_time=dt.time(9),
+            end_time=dt.time(17),
+            status=ShiftStatus.PUBLISHED,
+        )
+        self.dismiss(self.anna)
+
+        self.assertEqual(self.call("delete", f"/employees/{self.anna.id}/").status_code, 204)
+
+        self.anna.refresh_from_db()
+        self.assertEqual(self.anna.status, "removed")
+        self.assertEqual(Shift.objects.filter(employee=self.anna).count(), 1)
+
+    def test_working_employee_cannot_be_removed(self):
+        response = self.call("delete", f"/employees/{self.anna.id}/")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("уволен", response.json()["detail"])
+        self.assertEqual(self.names(), ["Anna", "Igor"])
+
+    def test_removing_twice_is_harmless(self):
+        Shift.objects.create(
+            employee=self.anna,
+            store=self.store,
+            date=MONDAY,
+            start_time=dt.time(9),
+            end_time=dt.time(17),
+            status=ShiftStatus.PUBLISHED,
+        )
+        self.dismiss(self.anna)
+
+        self.assertEqual(self.call("delete", f"/employees/{self.anna.id}/").status_code, 204)
+        self.assertEqual(self.call("delete", f"/employees/{self.anna.id}/").status_code, 204)
+
+        self.assertEqual(self.names(), ["Igor"])
 
 
 class TaskTemplateTests(OwnerApiTestCase):

@@ -66,6 +66,36 @@ class EmployeeInviteView(APIView):
         return Response(person(employee))
 
 
+class EmployeeDeleteView(APIView):
+    def delete(self, request, employee_id):
+        """
+        Убрать уволенного сотрудника из списка.
+
+        Если он ни разу не работал — запись удаляем целиком. Если за ним есть смены или
+        отметки, запись остаётся: на неё ссылается история задач, и «Отметил Пётр С.»
+        не должно превратиться в пустое место. Из списка сотрудников он пропадает.
+        """
+        employee = get_employee(request, employee_id)
+        if employee.status == EmployeeStatus.ACTIVE:
+            return Response(
+                {"detail": "Сначала отметьте, что сотрудник уволен"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        with transaction.atomic():
+            employee.invites.all().delete()
+            never_worked = not (
+                employee.shifts.exists()
+                or employee.completions.exists()
+                or employee.claims.exists()
+            )
+            if never_worked:
+                employee.delete()
+            else:
+                employee.status = EmployeeStatus.REMOVED
+                employee.save(update_fields=["status"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class EmployeeDismissView(APIView):
     def post(self, request, employee_id):
         employee = get_employee(request, employee_id)

@@ -159,8 +159,8 @@ select {
  */
 .screen > [class*='CellList_mode_island'] {
   width: auto;
-  margin-right: 16px;
-  margin-left: 16px;
+  margin-right: var(--gutter);
+  margin-left: var(--gutter);
 }
 
 /* Крупные заголовки в плотном трекинге читаются дороже. */
@@ -173,6 +173,12 @@ select {
 /* Экран ------------------------------------------------------------------ */
 
 .screen {
+  /*
+   * Боковое поле экрана. Держим в одной переменной: таблица графика выходит за
+   * блок отрицательным полем, и стоило этим числам разойтись, как страницу
+   * начинало таскать по горизонтали на пару пикселей.
+   */
+  --gutter: 16px;
   display: flex;
   flex-direction: column;
   gap: var(--step);
@@ -191,7 +197,7 @@ select {
 
 .screen__header,
 .screen__block {
-  padding: 0 16px;
+  padding: 0 var(--gutter);
 }
 
 .screen__header {
@@ -590,8 +596,10 @@ select {
 
 .schedule__scroll {
   overflow-x: auto;
-  margin: 0 -16px;
-  padding: 0 16px;
+  /* Прокрутка таблицы не должна тянуть за собой всю страницу и жест «назад». */
+  overscroll-behavior-x: contain;
+  margin: 0 calc(var(--gutter) * -1);
+  padding: 0 var(--gutter);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -740,7 +748,18 @@ select {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+/*
+ * Правило `.field > *` выше разрешает детям сжиматься, иначе длинная подпись
+ * распирала форму. Но переключателю сжиматься нельзя: дорожка ужималась до 31px,
+ * а кружок оставался прежним и вылезал за её край.
+ */
+.field--row > :not(.field__text) {
+  flex: 0 0 auto;
+  min-width: auto;
 }
 
 .field__hint {
@@ -1157,18 +1176,8 @@ select {
 
 @media (max-width: 520px) {
   .screen {
+    --gutter: 14px;
     padding-top: 8px;
-  }
-
-  .screen > [class*='CellList_mode_island'] {
-    margin-right: 14px;
-    margin-left: 14px;
-  }
-
-  .screen__header,
-  .screen__block {
-    padding-right: 14px;
-    padding-left: 14px;
   }
 
   .screen__header {
