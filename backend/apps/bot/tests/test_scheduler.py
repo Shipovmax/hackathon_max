@@ -986,10 +986,10 @@ class ClaimSchedulerTests(TestCase):
 @override_settings(REMINDER_FIRST_MINUTES_BEFORE=15, REMINDER_FINAL_MINUTES_BEFORE=5)
 class SendRemindersTests(TestCase):
     """
-    Напоминания отсчитываются от срока задачи, то есть от планового времени плюс допуск.
+    Две пары напоминаний отсчитываются от планового времени и от срока задачи.
 
     Задача стоит на 12:00 с допуском 15 минут, значит срок — 12:15 по Москве (09:15 UTC),
-    первое напоминание в 12:00, последнее в 12:10.
+    сообщения уходят в 11:45, 11:55, 12:00 и 12:10.
     """
 
     def setUp(self):
@@ -1026,10 +1026,50 @@ class SendRemindersTests(TestCase):
             status=ShiftStatus.PUBLISHED,
         )
         self.client = RecordingClient()
+        self.planned = datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)
         self.deadline = datetime(2026, 9, 21, 9, 15, tzinfo=timezone.utc)
+        self.planned_first_at = self.planned - timedelta(minutes=15)
+        self.planned_final_at = self.planned - timedelta(minutes=5)
         self.first_at = self.deadline - timedelta(minutes=15)
         self.final_at = self.deadline - timedelta(minutes=5)
         self.due_at = self.first_at
+
+    def test_sends_two_reminders_before_planned_time(self):
+        send_reminders(self.planned_first_at, client=self.client)
+        send_reminders(self.planned_final_at, client=self.client)
+
+        self.assertEqual(
+            [call["text"] for call in self.client.sent],
+            [
+                "Напоминание: «Opening store», плановое время 12:00.\n"
+                "Осталось 15 минут до планового времени.",
+                "Последнее напоминание до планового времени: «Opening store», "
+                "плановое время 12:00.\n"
+                "Осталось 5 минут до планового времени.",
+            ],
+        )
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.reminder_sent_at, self.planned_first_at)
+        self.assertEqual(self.instance.final_reminder_sent_at, self.planned_final_at)
+
+    def test_sends_all_four_reminders_in_order(self):
+        for moment in (
+            self.planned_first_at,
+            self.planned_final_at,
+            self.first_at,
+            self.final_at,
+        ):
+            send_reminders(moment, client=self.client)
+            send_reminders(moment, client=self.client)
+
+        self.assertEqual(len(self.client.sent), 4)
+        self.assertIn("до планового времени", self.client.sent[0]["text"])
+        self.assertIn("до планового времени", self.client.sent[1]["text"])
+        self.assertIn("после 12:15 задача станет просроченной", self.client.sent[2]["text"])
+        self.assertIn("после 12:15 задача станет просроченной", self.client.sent[3]["text"])
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.reminder_sent_at, self.first_at)
+        self.assertEqual(self.instance.final_reminder_sent_at, self.final_at)
 
     def test_sends_first_reminder_with_done_button_and_marks_instance(self):
         send_reminders(self.first_at, client=self.client)
@@ -1146,7 +1186,7 @@ class SendRemindersTests(TestCase):
         self.assertEqual(self.instance.status, TaskStatus.SCHEDULED)
 
     def test_does_not_send_before_the_window_or_after_the_deadline(self):
-        send_reminders(self.first_at - timedelta(seconds=1), client=self.client)
+        send_reminders(self.planned_first_at - timedelta(seconds=1), client=self.client)
         self.assertEqual(self.client.sent, [])
 
         send_reminders(self.deadline, client=self.client)

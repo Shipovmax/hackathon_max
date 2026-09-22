@@ -160,6 +160,16 @@ def reminder(task_title: str, planned: str, deadline: str, minutes_left: int, fi
     )
 
 
+def planned_time_reminder(
+    task_title: str, planned: str, minutes_left: int, final: bool
+) -> str:
+    head = "Последнее напоминание до планового времени" if final else "Напоминание"
+    return (
+        f"{head}: «{task_title}», плановое время {planned}.\n"
+        f"Осталось {minutes(minutes_left)} до планового времени."
+    )
+
+
 def awaiting_photo_by(task_title: str, employee_name: str) -> str:
     return f"Задача «{task_title}» уже ожидает фото от {employee_name}."
 

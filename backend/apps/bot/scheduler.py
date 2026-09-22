@@ -159,16 +159,16 @@ def send_claim_requests(now: datetime, client=None) -> None:
 
 def send_reminders(now: datetime, client=None) -> None:
     """
-    Два напоминания перед сроком задачи: за REMINDER_FIRST и REMINDER_FINAL минут.
+    Четыре напоминания: два перед плановым временем и два перед сроком задачи.
 
-    Срок — плановое время плюс допуск задачи, то есть момент, когда она станет просроченной
-    и о ней узнает владелец. Поэтому оба напоминания говорят, сколько осталось до него.
+    Для каждой границы отправляем сообщения за REMINDER_FIRST и REMINDER_FINAL минут.
+    Две временные отметки переиспользуются для обеих пар: время до planned_at означает,
+    что отправлена плановая пара, время начиная с planned_at — что отправлена пара до срока.
     """
     first_lead = timedelta(minutes=settings.REMINDER_FIRST_MINUTES_BEFORE)
     final_lead = timedelta(minutes=settings.REMINDER_FINAL_MINUTES_BEFORE)
     sender = client
     instances = TaskInstance.objects.filter(
-        final_reminder_sent_at__isnull=True,
         completion__isnull=True,
         status__in=(TaskStatus.SCHEDULED, TaskStatus.REMINDED),
         template__is_active=True,
@@ -177,11 +177,28 @@ def send_reminders(now: datetime, client=None) -> None:
     ).select_related("template__store")
 
     for instance in instances:
-        deadline = planned_at(instance) + timedelta(minutes=instance.template.tolerance_minutes)
+        planned = planned_at(instance)
+        deadline = planned + timedelta(minutes=instance.template.tolerance_minutes)
         if now >= deadline:
             continue
-        final = now >= deadline - final_lead
-        if not final and (now < deadline - first_lead or instance.reminder_sent_at is not None):
+
+        stages = (
+            (planned - first_lead, planned, False, "planned"),
+            (planned - final_lead, planned, True, "planned"),
+            (deadline - first_lead, deadline, False, "deadline"),
+            (deadline - final_lead, deadline, True, "deadline"),
+        )
+        due_stages = [stage for stage in stages if stage[0] <= now < stage[1]]
+        if not due_stages:
+            continue
+
+        _, target, final, phase = max(due_stages, key=lambda stage: stage[0])
+        marker = instance.final_reminder_sent_at if final else instance.reminder_sent_at
+        phase_sent = marker is not None and (
+            (phase == "planned" and marker < planned)
+            or (phase == "deadline" and marker >= planned)
+        )
+        if phase_sent:
             continue
 
         recipient_ids = list(
@@ -203,23 +220,35 @@ def send_reminders(now: datetime, client=None) -> None:
 
         if sender is None:
             sender = MaxClient()
-        minutes_left = max(1, int((deadline - now).total_seconds() // 60))
+        minutes_left = max(1, int((target - now).total_seconds() // 60))
         for user_id in recipient_ids:
-            sender.send_message(
-                user_id=user_id,
-                text=texts.reminder(
+            if phase == "planned":
+                message = texts.planned_time_reminder(
+                    instance.template.title,
+                    instance.template.planned_time.strftime("%H:%M"),
+                    minutes_left,
+                    final,
+                )
+            else:
+                message = texts.reminder(
                     instance.template.title,
                     instance.template.planned_time.strftime("%H:%M"),
                     deadline.strftime("%H:%M"),
                     minutes_left,
                     final,
-                ),
+                )
+            sender.send_message(
+                user_id=user_id,
+                text=message,
                 buttons=keyboards.done_button(instance.id),
             )
 
-        # На последнем напоминании закрываем и первое: если бот лежал в его окно,
-        # посылать «осталось 15 минут» задним числом уже незачем.
-        instance.reminder_sent_at = instance.reminder_sent_at or now
+        # На втором напоминании каждой пары закрываем и первое: если бот лежал в его
+        # окно, посылать запоздалое «осталось 15 минут» уже незачем.
+        if not final or instance.reminder_sent_at is None or (
+            phase == "deadline" and instance.reminder_sent_at < planned
+        ):
+            instance.reminder_sent_at = now
         instance.status = TaskStatus.REMINDED
         fields = ["reminder_sent_at", "status"]
         if final:

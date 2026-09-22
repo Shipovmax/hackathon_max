@@ -47,6 +47,20 @@ class TextsTests(SimpleTestCase):
             )
         )
 
+    def test_planned_time_reminder_names_the_target(self):
+        self.assertEqual(
+            texts.planned_time_reminder("Открытие магазина", "09:00", 15, False),
+            "Напоминание: «Открытие магазина», плановое время 09:00.\n"
+            "Осталось 15 минут до планового времени.",
+        )
+
+    def test_final_planned_time_reminder_is_scoped_to_planned_time(self):
+        self.assertTrue(
+            texts.planned_time_reminder("Открытие магазина", "09:00", 5, True).startswith(
+                "Последнее напоминание до планового времени"
+            )
+        )
+
     def test_photo_request_names_the_task(self):
         text = texts.ask_photo_for("Открытие магазина", "09:00", "09:15", 10)
         self.assertIn("Задача «Открытие магазина», плановое время 09:00.", text)
