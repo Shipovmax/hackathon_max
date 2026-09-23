@@ -88,6 +88,10 @@ def _denial_text(employee: Employee, instance: TaskInstance, decision, now) -> s
         replacement = _replacement_shift(employee, instance, now)
         who = replacement.employee.name if replacement else "следующая смена"
         return texts.denial_ended(_time(decision.shift_end), title, who)
+    if decision.denial == MarkDenial.TOO_EARLY:
+        return texts.denial_too_early(
+            title, _time(decision.available_from), _time(instance.template.planned_time)
+        )
     if decision.denial == MarkDenial.ALREADY_DONE:
         return texts.denial_already_done(title, decision.done_by, _time(decision.done_at))
     return texts.UNKNOWN

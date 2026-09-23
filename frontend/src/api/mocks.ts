@@ -3,7 +3,7 @@
 // Хранилище изменяемое, поэтому редактирование работает так же, как будет с API,
 // но живёт до перезагрузки страницы.
 import { findGaps } from '../lib/coverage';
-import { addDays, minutesOf, today, weekStart } from '../lib/format';
+import { addDays, DEFAULT_LEAD_MINUTES, earlierBy, minutesOf, today, weekStart } from '../lib/format';
 import { ApiError } from './errors';
 import type {
   Dashboard,
@@ -73,6 +73,7 @@ const template = (
   title,
   kind: 'daily',
   planned_time,
+  available_from: earlierBy(planned_time, DEFAULT_LEAD_MINUTES),
   on_date: null,
   tolerance_minutes,
   requires_photo: true,
@@ -220,8 +221,11 @@ function dayTasks(storeId: number, date: string): DayTask[] {
       const performer = shift.find((s) => minutesOf(s.start) <= planned && planned <= minutesOf(s.end)) ?? shift[0];
       const base = {
         id: item.id,
+        template_id: item.id,
         title: item.title,
         planned_time: item.planned_time,
+        available_from: item.available_from,
+        kind: item.kind,
         late_minutes: null,
         done_by: null,
         done_at: null,
@@ -371,6 +375,15 @@ const routes: [string, RegExp, Handler][] = [
     employee.status = 'dismissed';
     employee.invite_code = null;
     return employee;
+  }],
+  ['DELETE', /^\/employees\/(\d+)\/$/, (p) => {
+    const [item, employee] = storeOfEmployee(Number(p[0]));
+    if (employee.status !== 'dismissed') {
+      throw new ApiError(409, 'conflict', 'Сначала отметьте, что сотрудник уволен');
+    }
+    // На сервере запись с историей остаётся ради отметок, но из списка пропадает так же.
+    item.employees = item.employees.filter((person) => person.id !== employee.id);
+    return null;
   }],
   ['PATCH', /^\/task-templates\/(\d+)\/$/, (p, _q, body) => {
     const id = Number(p[0]);

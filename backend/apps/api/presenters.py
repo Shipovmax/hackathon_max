@@ -30,8 +30,10 @@ def person(employee: Employee) -> dict:
 
 
 def store_with_people(store: Store) -> dict:
+    # Убранных из списка не показываем: их держит только история отметок.
     employees = sorted(
-        store.employees.all(), key=lambda e: (e.status == EmployeeStatus.DISMISSED, e.name)
+        (e for e in store.employees.all() if e.status != EmployeeStatus.REMOVED),
+        key=lambda e: (e.status == EmployeeStatus.DISMISSED, e.name),
     )
     return {
         "id": store.id,
@@ -49,6 +51,7 @@ def template_item(template: TaskTemplate) -> dict:
         "title": template.title,
         "kind": template.kind,
         "planned_time": hhmm(template.planned_time),
+        "available_from": hhmm(template.available_from),
         "on_date": template.on_date.isoformat() if template.on_date else None,
         "tolerance_minutes": template.tolerance_minutes,
         "requires_photo": template.requires_photo,
@@ -62,8 +65,12 @@ def day_task(row: DayTaskRow, zone: ZoneInfo) -> dict:
     claim = getattr(instance, "claim", None) if instance else None
     return {
         "id": row.key,
+        # Шаблон нужен карточке точки: задачу правят прямо из списка дня.
+        "template_id": row.template.id,
         "title": row.template.title,
         "planned_time": hhmm(row.template.planned_time),
+        "available_from": hhmm(row.template.available_from),
+        "kind": row.template.kind,
         "status": row.status,
         "late_minutes": completion.late_minutes if completion else None,
         "done_by": completion.employee.name if completion else None,

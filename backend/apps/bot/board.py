@@ -41,6 +41,13 @@ def deadline_at(instance: TaskInstance) -> datetime:
     return planned_at(instance) + timedelta(minutes=instance.template.tolerance_minutes)
 
 
+def is_open_yet(instance: TaskInstance, now: datetime) -> bool:
+    """Подошло ли окно задачи: раньше него отмечать нечего."""
+    zone = store_zone(instance.template.store)
+    opens_at = datetime.combine(instance.date, instance.template.available_from, tzinfo=zone)
+    return now >= opens_at
+
+
 def is_running(shift: Shift, now: datetime) -> bool:
     """Идёт ли смена прямо сейчас, с допуском на границах."""
     zone = store_zone(shift.store)
@@ -109,7 +116,7 @@ def rows_for(employee, shift: Shift, now: datetime) -> list[Row]:
     return rows
 
 
-def _describe(row: Row) -> tuple[str, str, str, str]:
+def _describe(row: Row, now: datetime) -> tuple[str, str, str, str]:
     """Строка списка: значок, время, название, пояснение о текущем состоянии."""
     instance, template = row.instance, row.instance.template
     at = _hhmm(template.planned_time)
@@ -131,6 +138,8 @@ def _describe(row: Row) -> tuple[str, str, str, str]:
         mark, note = "⚠", texts.BOARD_ROW_MISSED
     elif row.status == TaskStatus.UNCLAIMED:
         mark, note = "⚠", texts.board_row_unclaimed(at)
+    elif not is_open_yet(instance, now):
+        mark, note = "·", texts.board_row_not_yet(_hhmm(template.available_from))
     elif template.requires_claim and getattr(instance, "claim", None) is None:
         mark, note = "○", texts.board_row_claim_free(at)
     else:
@@ -138,11 +147,13 @@ def _describe(row: Row) -> tuple[str, str, str, str]:
     return mark, at, template.title, note
 
 
-def _button_rows(rows: list[Row]) -> list[tuple[int, str, str, bool]]:
+def _button_rows(rows: list[Row], now: datetime) -> list[tuple[int, str, str, bool]]:
     """Кнопки ставим только у задач, с которыми сотрудник может что-то сделать сейчас."""
     out = []
     for row in rows:
         if row.done or row.status == TaskStatus.MISSED:
+            continue
+        if not is_open_yet(row.instance, now):
             continue
         template = row.instance.template
         needs_claim = template.requires_claim and getattr(row.instance, "claim", None) is None
@@ -158,11 +169,11 @@ def build(employee, shift: Shift, now: datetime, heading: str) -> tuple[str, lis
         employee.store.name,
         _hhmm(shift.start_time),
         _hhmm(shift.end_time),
-        [_describe(row) for row in rows],
+        [_describe(row, now) for row in rows],
         sum(1 for row in rows if row.done),
         len(rows),
     )
-    return text, keyboards.task_buttons(_button_rows(rows))
+    return text, keyboards.task_buttons(_button_rows(rows, now))
 
 
 def mark_shown(shift: Shift, now: datetime) -> None:

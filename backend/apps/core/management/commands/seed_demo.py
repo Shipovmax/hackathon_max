@@ -92,6 +92,16 @@ def demo_photo_png(width: int = 360, height: int = 480) -> bytes:
     )
 
 
+# Демо-задачи можно отмечать за полчаса до планового времени, не раньше.
+DEMO_LEAD_MINUTES = 30
+
+
+def earlier(value: dt.time, minutes: int) -> dt.time:
+    """Время минус минуты, без перехода через полночь."""
+    shifted = value.hour * 60 + value.minute - minutes
+    return dt.time.min if shifted <= 0 else dt.time(shifted // 60, shifted % 60)
+
+
 class Command(BaseCommand):
     help = "Create demo network, stores, employees, schedule and today's tasks (test data)"
 
@@ -195,6 +205,7 @@ class Command(BaseCommand):
                     defaults={
                         "kind": kind,
                         "planned_time": planned,
+                        "available_from": earlier(planned, DEMO_LEAD_MINUTES),
                         "on_date": today if kind == TaskKind.ONE_TIME else None,
                         "tolerance_minutes": tolerance,
                         "requires_photo": photo,

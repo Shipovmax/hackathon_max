@@ -44,8 +44,9 @@ interface EditorState {
 
 export function Schedule() {
   const { storeId } = useParams();
-  // Владелец обычно заполняет следующую неделю, с неё и начинаем.
-  const [week, setWeek] = useState(() => addDays(weekStart(today()), 7));
+  // Открываем текущую неделю: чаще смотрят на то, что идёт сейчас, а следующая
+  // в одном нажатии стрелкой вперёд.
+  const [week, setWeek] = useState(() => weekStart(today()));
   const state = useApi<ScheduleData>(`/stores/${storeId}/schedule/?week=${week}`);
 
   return (

@@ -14,6 +14,7 @@ class MarkDenial(str, Enum):
     NOT_STARTED = "not_started"
     ENDED = "ended"
     ALREADY_DONE = "already_done"
+    TOO_EARLY = "too_early"
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class MarkDecision:
     shift_end: time | None = None
     done_by: str | None = None
     done_at: time | None = None
+    available_from: time | None = None
 
 
 def check_can_mark(employee, instance, now: datetime) -> MarkDecision:
@@ -58,6 +60,11 @@ def check_can_mark(employee, instance, now: datetime) -> MarkDecision:
 
     zone = store_zone(store)
     tolerance = timedelta(minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES)
+
+    # Окно задачи: раньше него отметки нет смысла принимать, даже если смена идёт.
+    available_from = instance.template.available_from
+    if now < datetime.combine(instance.date, available_from, tzinfo=zone):
+        return MarkDecision(False, MarkDenial.TOO_EARLY, available_from=available_from)
 
     def bounds(shift):
         start = datetime.combine(shift.date, shift.start_time, tzinfo=zone)

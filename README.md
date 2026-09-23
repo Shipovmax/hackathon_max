@@ -126,7 +126,7 @@ docker compose run --rm --no-deps migrate python manage.py test --noinput
 | `GET /api/stores/{id}/day/?date=` | Карточка точки: задачи дня, кто отметил, кто на смене | готово |
 | `GET/POST /api/stores/` | Точки и сотрудники | готово |
 | `POST /api/stores/{id}/employees/`, `POST /api/employees/{id}/invite/`, `POST /api/employees/{id}/dismiss/` | код приглашения, увольнение (история остаётся) | готово |
-| `GET/POST /api/stores/{id}/task-templates/`, `PATCH/DELETE /api/task-templates/{id}/` | Задачи точки (удаление скрывает задачу, история остаётся) | готово |
+| `GET/POST /api/stores/{id}/task-templates/`, `PATCH/DELETE /api/task-templates/{id}/` | Задачи точки: плановое время, `available_from` (раньше него не отметить, по умолчанию на 30 минут раньше плана), допуск, фото, «Беру». Удаление скрывает задачу, история остаётся | готово |
 | `GET/PUT /api/stores/{id}/schedule/?week=` | График: чтение и сохранение (опубликованная неделя остаётся опубликованной) | готово |
 | `POST /api/stores/{id}/schedule/coverage/` | проверка покрытия черновика без сохранения | готово |
 | `POST /api/stores/{id}/schedule/publish/` | публикация недели | готово |
