@@ -15,6 +15,7 @@ const TASK: Record<TaskStatus, [string, Tone]> = {
 
 const HEALTH: Record<StoreHealth, [string, Tone]> = {
   ok: ['в порядке', 'ok'],
+  late: ['с опозданием', 'warn'],
   overdue: ['просрочка', 'bad'],
   unclaimed: ['не взята', 'bad'],
 };

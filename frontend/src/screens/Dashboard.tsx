@@ -19,7 +19,10 @@ export function Dashboard() {
   return (
     <AsyncView state={state}>
       {(data) => {
-        const problems = data.stores.filter((store) => store.health !== 'ok');
+        // Красные — задача не сделана, туда надо вмешаться. Жёлтые — сделали, но поздно.
+        const urgent = data.stores.filter((store) => store.health === 'overdue' || store.health === 'unclaimed');
+        const late = data.stores.filter((store) => store.health === 'late');
+        const tone = urgent.length ? 'bad' : late.length ? 'warn' : 'ok';
         const done = data.stores.reduce((sum, store) => sum + store.done, 0);
         const total = data.stores.reduce((sum, store) => sum + store.total, 0);
 
@@ -51,18 +54,20 @@ export function Dashboard() {
           >
             {data.stores.length > 0 && (
               <div className="screen__block">
-                <div className={`summary summary--${problems.length === 0 ? 'ok' : 'bad'}`}>
+                <div className={`summary summary--${tone}`}>
                   <Typography.Title variant="small-strong">
-                    {problems.length === 0
-                      ? 'Все точки без замечаний'
-                      : `${problems.length} ${plural(problems.length, ['точка требует', 'точки требуют', 'точек требуют'])} внимания`}
+                    {urgent.length
+                      ? `${urgent.length} ${plural(urgent.length, ['точка требует', 'точки требуют', 'точек требуют'])} внимания`
+                      : late.length
+                        ? `Всё выполнено, но ${late.length} ${plural(late.length, ['точка', 'точки', 'точек'])} с опозданием`
+                        : 'Все точки без замечаний'}
                   </Typography.Title>
                   <Typography.Body variant="small">
                     {total > 0
                       ? `Выполнено ${done} из ${total} ${plural(total, ['задачи', 'задач', 'задач'])} за день`
                       : 'Задач на сегодня нет'}
                   </Typography.Body>
-                  <Progress done={done} total={total} tone={problems.length === 0 ? 'ok' : 'warn'} />
+                  <Progress done={done} total={total} tone={tone === 'ok' ? 'ok' : 'warn'} />
                 </div>
               </div>
             )}

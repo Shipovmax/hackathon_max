@@ -6,6 +6,7 @@ from .stores import (
     EmployeeDeleteView,
     EmployeeDismissView,
     EmployeeInviteView,
+    StoreDetailView,
     StoreEmployeesView,
     StoreListView,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "PublishView",
     "ScheduleView",
     "StoreDayView",
+    "StoreDetailView",
     "StoreEmployeesView",
     "StoreListView",
     "TaskTemplateDetailView",

@@ -48,11 +48,20 @@ function gapsOfDay(date: string, shifts: ShiftInput[], open: number, close: numb
   return gaps;
 }
 
-/** Окна за неделю: дни идут по порядку, внутри дня — по времени. */
-export function findGaps(dates: string[], shifts: ShiftInput[], openTime: string, closeTime: string): Gap[] {
+/**
+ * Окна за неделю: дни идут по порядку, внутри дня — по времени. Выходные точки
+ * пропускаем: пустой день, когда магазин закрыт, — не окно.
+ */
+export function findGaps(
+  dates: string[],
+  shifts: ShiftInput[],
+  openTime: string,
+  closeTime: string,
+  closedDates: string[] = [],
+): Gap[] {
   const open = minutesOf(openTime);
   const close = minutesOf(closeTime);
-  return dates.flatMap((date) =>
+  return dates.filter((date) => !closedDates.includes(date)).flatMap((date) =>
     gapsOfDay(
       date,
       shifts.filter((shift) => shift.date === date),

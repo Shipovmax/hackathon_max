@@ -18,6 +18,7 @@ from apps.core.domain.lifecycle import (
     store_today,
     store_zone,
 )
+from apps.core.domain.permissions import shift_open_until
 from apps.core.models import (
     EmployeeStatus,
     Shift,
@@ -49,12 +50,17 @@ def is_open_yet(instance: TaskInstance, now: datetime) -> bool:
 
 
 def is_running(shift: Shift, now: datetime) -> bool:
-    """Идёт ли смена прямо сейчас, с допуском на границах."""
+    """
+    Может ли смена сейчас работать со своими задачами.
+
+    Начинается с допуском на границе, а заканчивается не раньше срока последней своей
+    задачи: иначе закрытие в 22:00 пропадало бы из списка в 22:05, хотя его ещё можно
+    подтвердить.
+    """
     zone = store_zone(shift.store)
     tolerance = timedelta(minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES)
     starts_at = datetime.combine(shift.date, shift.start_time, tzinfo=zone)
-    ends_at = datetime.combine(shift.date, shift.end_time, tzinfo=zone)
-    return starts_at - tolerance <= now <= ends_at + tolerance
+    return starts_at - tolerance <= now <= shift_open_until(shift)
 
 
 def current_shift(employee, now: datetime) -> Shift | None:

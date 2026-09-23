@@ -41,6 +41,7 @@ def store_with_people(store: Store) -> dict:
         "address": store.address,
         "open_time": hhmm(store.open_time),
         "close_time": hhmm(store.close_time),
+        "closed_weekdays": store.closed_weekdays or [],
         "employees": [person(employee) for employee in employees],
     }
 
@@ -92,6 +93,9 @@ def gaps_of(store: Store, dates: list[date], shifts) -> list[dict]:
     """Uncovered parts of the working day for every date; `shifts` are (date, start, end) tuples."""
     result = []
     for day in dates:
+        # В выходной точка закрыта: пустой день — это не окно, а так и задумано.
+        if store.is_closed_on(day):
+            continue
         intervals = [(start, end) for shift_day, start, end in shifts if shift_day == day]
         for start, end in find_gaps(
             store.open_time, store.close_time, intervals, settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES
@@ -119,6 +123,7 @@ def schedule_payload(store: Store, week_start: date) -> dict:
         "status": week_status(store, week_start),
         "open_time": hhmm(store.open_time),
         "close_time": hhmm(store.close_time),
+        "closed_weekdays": store.closed_weekdays or [],
         "employees": [{"id": employee.id, "name": employee.name} for employee in employees],
         "shifts": [
             {

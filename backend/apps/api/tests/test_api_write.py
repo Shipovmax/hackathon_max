@@ -389,3 +389,66 @@ class ScheduleTests(OwnerApiTestCase):
         foreign = self.other_owner()
         self.assertEqual(self.call("get", f"/stores/{foreign.id}/schedule/").status_code, 404)
         self.assertEqual(self.call("put", f"/stores/{foreign.id}/schedule/", self.draft([])).status_code, 404)
+
+
+class StoreEditTests(OwnerApiTestCase):
+    """Точку правят после создания: часы работы и выходные меняются со временем."""
+
+    def url(self):
+        return f"/stores/{self.store.id}/"
+
+    def test_hours_can_be_changed_after_creation(self):
+        response = self.call("patch", self.url(), {"open_time": "10:00", "close_time": "21:00"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((response.json()["open_time"], response.json()["close_time"]), ("10:00", "21:00"))
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.open_time, dt.time(10))
+
+    def test_untouched_fields_keep_their_values(self):
+        body = self.call("patch", self.url(), {"name": "Lenina, 14A"}).json()
+        self.assertEqual((body["name"], body["open_time"], body["close_time"]), ("Lenina, 14A", "09:00", "22:00"))
+
+    def test_new_opening_is_checked_against_the_current_closing(self):
+        response = self.call("patch", self.url(), {"open_time": "23:00"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("позже", response.json()["detail"])
+
+    def test_days_off_are_saved_sorted_and_without_repeats(self):
+        body = self.call("patch", self.url(), {"closed_weekdays": [6, 5, 6]}).json()
+        self.assertEqual(body["closed_weekdays"], [5, 6])
+
+    def test_days_off_are_validated(self):
+        for bad in ([7], [-1], ["sun"], [True], "6", list(range(7))):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.call("patch", self.url(), {"closed_weekdays": bad}).status_code, 400)
+
+    def test_new_store_can_be_created_with_days_off(self):
+        payload = {"name": "Vostok", "address": "", "open_time": "10:00", "close_time": "20:00", "closed_weekdays": [0]}
+        body = self.call("post", "/stores/", payload).json()
+        self.assertEqual(body["closed_weekdays"], [0])
+
+    def test_list_reports_days_off(self):
+        self.call("patch", self.url(), {"closed_weekdays": [6]})
+        self.assertEqual(self.call("get", "/stores/").json()[0]["closed_weekdays"], [6])
+
+    def test_foreign_store_cannot_be_edited(self):
+        foreign = self.other_owner()
+        self.assertEqual(self.call("patch", f"/stores/{foreign.id}/", {"name": "Mine"}).status_code, 404)
+
+
+class ScheduleDaysOffTests(OwnerApiTestCase):
+    """Пустой выходной в графике — это не окно, и красным его не подсвечиваем."""
+
+    def test_day_off_is_not_reported_as_a_gap(self):
+        sunday = MONDAY + dt.timedelta(days=6)
+        self.call("patch", f"/stores/{self.store.id}/", {"closed_weekdays": [6]})
+        body = self.call("get", f"/stores/{self.store.id}/schedule/?week={MONDAY}").json()
+        self.assertEqual(body["closed_weekdays"], [6])
+        self.assertEqual(len(body["gaps"]), 6)
+        self.assertNotIn(sunday.isoformat(), {g["date"] for g in body["gaps"]})
+
+    def test_coverage_check_skips_days_off_too(self):
+        self.call("patch", f"/stores/{self.store.id}/", {"closed_weekdays": [5, 6]})
+        draft = {"week_start": MONDAY.isoformat(), "shifts": [shift(self.anna, d, "09:00", "22:00") for d in range(5)]}
+        response = self.call("post", f"/stores/{self.store.id}/schedule/coverage/", draft)
+        self.assertEqual(response.json()["gaps"], [])

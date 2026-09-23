@@ -16,6 +16,34 @@ from ..scoping import (
 )
 
 
+def clean_closed_weekdays(value) -> list[int]:
+    """Дни недели, когда точка закрыта: 0 — понедельник, 6 — воскресенье."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(
+        isinstance(day, bool) or not isinstance(day, int) or not 0 <= day <= 6 for day in value
+    ):
+        raise bad_request("Выходные — список дней недели от 0 (пн) до 6 (вс)")
+    days = sorted(set(value))
+    if len(days) == 7:
+        raise bad_request("Точка не может быть закрыта всю неделю")
+    return days
+
+
+def clean_store(values: dict) -> dict:
+    """Поля точки целиком: и для создания, и для правки поверх текущих значений."""
+    open_time, close_time = parse_time(values.get("open_time")), parse_time(values.get("close_time"))
+    if close_time <= open_time:
+        raise bad_request("Магазин должен закрываться позже, чем открывается")
+    return {
+        "name": clean_text(values.get("name"), "название", 200),
+        "address": clean_text(values.get("address"), "адрес", 300, required=False),
+        "open_time": open_time,
+        "close_time": close_time,
+        "closed_weekdays": clean_closed_weekdays(values.get("closed_weekdays")),
+    }
+
+
 class StoreListView(APIView):
     def get(self, request):
         stores = (
@@ -28,18 +56,34 @@ class StoreListView(APIView):
 
     def post(self, request):
         network = owner_network(request)
-        body = request.data
-        open_time, close_time = parse_time(body.get("open_time")), parse_time(body.get("close_time"))
-        if close_time <= open_time:
-            raise bad_request("Магазин должен закрываться позже, чем открывается")
-        store = Store.objects.create(
-            network=network,
-            name=clean_text(body.get("name"), "название", 200),
-            address=clean_text(body.get("address"), "адрес", 300, required=False),
-            open_time=open_time,
-            close_time=close_time,
-        )
+        store = Store.objects.create(network=network, **clean_store(request.data))
         return Response(store_with_people(store), status=status.HTTP_201_CREATED)
+
+
+class StoreDetailView(APIView):
+    def get(self, request, store_id):
+        return Response(store_with_people(get_store(request, store_id)))
+
+    def patch(self, request, store_id):
+        """
+        Правка точки после создания: название, адрес, часы работы, выходные.
+
+        Приходят только изменённые поля, поэтому проверяем их вместе с текущими:
+        новое закрытие должно быть позже старого открытия, и наоборот.
+        """
+        store = get_store(request, store_id)
+        current = {
+            "name": store.name,
+            "address": store.address,
+            "open_time": store.open_time.strftime("%H:%M"),
+            "close_time": store.close_time.strftime("%H:%M"),
+            "closed_weekdays": store.closed_weekdays,
+        }
+        values = clean_store({**current, **request.data})
+        for field, value in values.items():
+            setattr(store, field, value)
+        store.save(update_fields=list(values))
+        return Response(store_with_people(store))
 
 
 class StoreEmployeesView(APIView):

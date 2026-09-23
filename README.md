@@ -124,14 +124,14 @@ docker compose run --rm --no-deps migrate python manage.py test --noinput
 | `GET /api/me/` | вход, роль, сеть | готово |
 | `GET /api/dashboard/?date=` | Сводка: точки с проблемами сверху | готово |
 | `GET /api/stores/{id}/day/?date=` | Карточка точки: задачи дня, кто отметил, кто на смене | готово |
-| `GET/POST /api/stores/` | Точки и сотрудники | готово |
+| `GET/POST /api/stores/`, `GET/PATCH /api/stores/{id}/` | Точки и сотрудники: часы работы и выходные (`closed_weekdays`, 0 — пн) меняются после создания | готово |
 | `POST /api/stores/{id}/employees/`, `POST /api/employees/{id}/invite/`, `POST /api/employees/{id}/dismiss/` | код приглашения, увольнение (история остаётся) | готово |
 | `GET/POST /api/stores/{id}/task-templates/`, `PATCH/DELETE /api/task-templates/{id}/` | Задачи точки: плановое время, `available_from` (раньше него не отметить, по умолчанию на 30 минут раньше плана), допуск, фото, «Беру». Удаление скрывает задачу, история остаётся | готово |
 | `GET/PUT /api/stores/{id}/schedule/?week=` | График: чтение и сохранение (опубликованная неделя остаётся опубликованной) | готово |
 | `POST /api/stores/{id}/schedule/coverage/` | проверка покрытия черновика без сохранения | готово |
 | `POST /api/stores/{id}/schedule/publish/` | публикация недели | готово |
 | `GET /api/completions/{id}/photo/` | фото отметки, только владельцу этой сети | готово |
-| `/api/network/`, `PATCH /api/stores/{id}/` | переименование сети и точки | 501, фронтенд их пока не вызывает |
+| `/api/network/` | переименование сети | 501, фронтенд его не вызывает |
 
 Ошибки приходят как `{"detail": "текст"}`: 400 для неверных данных, 404 для чужих или несуществующих объектов, 409 для действий, которые сейчас невозможны.
 
