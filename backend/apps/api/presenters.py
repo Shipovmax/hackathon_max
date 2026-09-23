@@ -114,8 +114,12 @@ def week_status(store: Store, week_start: date) -> str:
 
 def schedule_payload(store: Store, week_start: date) -> dict:
     dates = week_dates(week_start)
+    # Только работающие: строки таблицы и её смены должны совпадать, а уволенный
+    # сотрудник точку уже не покрывает.
     shifts = list(
-        Shift.objects.filter(store=store, date__in=dates).order_by("date", "start_time", "employee__name")
+        Shift.objects.filter(store=store, date__in=dates, employee__status=EmployeeStatus.ACTIVE).order_by(
+            "date", "start_time", "employee__name"
+        )
     )
     employees = store.employees.filter(status=EmployeeStatus.ACTIVE).order_by("name")
     return {

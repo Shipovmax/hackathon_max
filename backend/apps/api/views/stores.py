@@ -3,6 +3,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.domain.lifecycle import store_today
 from apps.core.models import Employee, EmployeeStatus, InviteCode, Store
 
 from ..presenters import person, store_with_people
@@ -147,5 +148,8 @@ class EmployeeDismissView(APIView):
             employee.status = EmployeeStatus.DISMISSED
             employee.save(update_fields=["status"])
             employee.invites.filter(used_at__isnull=True).delete()
+            # Будущие смены уволенного отменяются: он не придёт, и график должен показать
+            # владельцу окно, а не ложное покрытие. Сегодняшняя и прошлые остаются историей.
+            employee.shifts.filter(date__gt=store_today(employee.store)).delete()
         # History stays: completions keep pointing at the employee, only the status changes.
         return Response(person(employee))
