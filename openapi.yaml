@@ -1,0 +1,217 @@
+openapi: 3.1.0
+info:
+  title: Контроль смен API
+  description: REST API мини-приложения владельца сети магазинов в MAX.
+  version: 1.0.0
+servers:
+  - url: https://task-controller.ru/api
+
+components:
+  securitySchemes:
+    MaxInitData:
+      type: apiKey
+      in: header
+      name: X-Max-Init-Data
+      description: Подписанные параметры запуска window.WebApp.initData.
+  parameters:
+    StoreId:
+      name: storeId
+      in: path
+      required: true
+      description: Идентификатор точки в сети владельца.
+      schema:
+        type: integer
+  schemas:
+    Error:
+      type: object
+      properties:
+        detail:
+          type: string
+    Store:
+      type: object
+      required: [id, name, address, open_time, close_time, employees]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        address:
+          type: string
+        open_time:
+          type: string
+        close_time:
+          type: string
+        employees:
+          type: array
+          items:
+            type: object
+
+security:
+  - MaxInitData: []
+
+paths:
+  /health/:
+    get:
+      operationId: health
+      summary: Проверить доступность API
+      security: []
+      responses:
+        "200":
+          description: Сервер работает
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    const: ok
+
+  /me/:
+    get:
+      operationId: getOwnerProfile
+      summary: Получить владельца и его сеть
+      responses:
+        "200":
+          description: Профиль владельца
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [max_user_id, first_name, role, network]
+                properties:
+                  max_user_id:
+                    type: integer
+                  first_name:
+                    type: string
+                  role:
+                    type: string
+                  network:
+                    type: [object, "null"]
+        "401":
+          description: Подпись запуска отсутствует или недействительна
+        "403":
+          description: Мини-приложение открыто не владельцем
+
+  /dashboard/:
+    get:
+      operationId: getDashboard
+      summary: Получить сводку сети
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Состояние точек за день
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [date, stores]
+                properties:
+                  date:
+                    type: string
+                    format: date
+                  stores:
+                    type: array
+                    items:
+                      type: object
+
+  /stores/:
+    get:
+      operationId: listStores
+      summary: Получить точки и сотрудников
+      responses:
+        "200":
+          description: Точки сети
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Store"
+
+  /stores/{storeId}/day/:
+    get:
+      operationId: getStoreDay
+      summary: Получить операционный день точки
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Задачи и смена точки
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [store, date, on_shift, tasks]
+                properties:
+                  store:
+                    type: object
+                  date:
+                    type: string
+                    format: date
+                  on_shift:
+                    type: array
+                  tasks:
+                    type: array
+
+  /stores/{storeId}/task-templates/:
+    get:
+      operationId: listTaskTemplates
+      summary: Получить шаблоны задач точки
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: Шаблоны задач
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /stores/{storeId}/schedule/:
+    get:
+      operationId: getSchedule
+      summary: Получить недельный график
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - name: week
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: График, сотрудники и окна покрытия
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [week_start, status, employees, shifts, gaps]
+                properties:
+                  week_start:
+                    type: string
+                    format: date
+                  status:
+                    type: string
+                    enum: [draft, published]
+                  employees:
+                    type: array
+                  shifts:
+                    type: array
+                  gaps:
+                    type: array

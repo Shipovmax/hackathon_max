@@ -1,0 +1,164 @@
+# DATA-API 1.0
+# Секреты и реальные данные запуска MAX в репозитории не хранятся.
+# Значение ownerInitData передаётся организаторам через защищённый канал.
+
+schemaVersion: "1.0"
+
+solution:
+  name: "Контроль смен"
+  teamId: "185"
+
+api:
+  baseUrl: "https://task-controller.ru/api"
+  openapi: "./openapi.yaml"
+  defaultHeaders:
+    Accept: "application/json"
+    X-Max-Init-Data: "${ownerInitData}"
+
+checks:
+  - id: "health"
+    name: "Доступность API"
+    description: "Публичная проверка работоспособности сервера"
+    method: "GET"
+    path: "/health/"
+    role: "public"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["status"]
+      bodySchema:
+        type: "object"
+        required: ["status"]
+        properties:
+          status:
+            const: "ok"
+    timeoutMs: 10000
+    repeatable: true
+
+  - id: "owner-profile"
+    name: "Авторизация владельца"
+    description: "Проверка подписи запуска MAX и получение сети владельца"
+    method: "GET"
+    path: "/me/"
+    role: "owner"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["max_user_id", "first_name", "role", "network"]
+      bodySchema:
+        type: "object"
+        required: ["max_user_id", "role", "network"]
+        properties:
+          max_user_id:
+            type: "integer"
+          role:
+            const: "owner"
+          network:
+            type: "object"
+    timeoutMs: 10000
+    repeatable: true
+
+  - id: "dashboard"
+    name: "Сводка сети"
+    description: "Получение состояния всех точек за текущий день"
+    method: "GET"
+    path: "/dashboard/"
+    role: "owner"
+    dependsOn: ["owner-profile"]
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["date", "stores"]
+      bodySchema:
+        type: "object"
+        required: ["date", "stores"]
+        properties:
+          date:
+            type: "string"
+            format: "date"
+          stores:
+            type: "array"
+    timeoutMs: 10000
+    repeatable: true
+
+  - id: "stores"
+    name: "Точки и сотрудники"
+    description: "Получение точек тестовой сети и сотрудников"
+    method: "GET"
+    path: "/stores/"
+    role: "owner"
+    dependsOn: ["owner-profile"]
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      bodySchema:
+        type: "array"
+        minItems: 1
+        items:
+          type: "object"
+          required: ["id", "name", "open_time", "close_time", "employees"]
+    extract:
+      storeId: "$[0].id"
+    timeoutMs: 10000
+    repeatable: true
+
+  - id: "store-day"
+    name: "Операционный день точки"
+    description: "Задачи дня, статусы выполнения и сотрудники на смене"
+    method: "GET"
+    path: "/stores/{storeId}/day/"
+    role: "owner"
+    dependsOn: ["stores"]
+    request:
+      path:
+        storeId: "${storeId}"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["store", "date", "on_shift", "tasks"]
+      bodySchema:
+        type: "object"
+        required: ["store", "date", "on_shift", "tasks"]
+    timeoutMs: 10000
+    repeatable: true
+
+  - id: "task-templates"
+    name: "Шаблоны задач точки"
+    description: "Настройки ежедневных и разовых задач"
+    method: "GET"
+    path: "/stores/{storeId}/task-templates/"
+    role: "owner"
+    dependsOn: ["stores"]
+    request:
+      path:
+        storeId: "${storeId}"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      bodySchema:
+        type: "array"
+        items:
+          type: "object"
+          required: ["id", "title", "planned_time", "available_from"]
+    timeoutMs: 10000
+    repeatable: true
+
+  - id: "schedule"
+    name: "Недельный график"
+    description: "Смены сотрудников и незакрытые окна текущей недели"
+    method: "GET"
+    path: "/stores/{storeId}/schedule/"
+    role: "owner"
+    dependsOn: ["stores"]
+    request:
+      path:
+        storeId: "${storeId}"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["week_start", "status", "employees", "shifts", "gaps"]
+      bodySchema:
+        type: "object"
+        required: ["week_start", "status", "employees", "shifts", "gaps"]
+    timeoutMs: 10000
+    repeatable: true

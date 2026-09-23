@@ -28,7 +28,7 @@ def _related(instance: TaskInstance, name: str):
 
 
 def evaluate_status(instance: TaskInstance, now: datetime) -> str:
-    """Status the task has at `now`, derived from what was actually recorded (CLAUDE.md, section 5)."""
+    """Status the task has at `now`, derived from its recorded lifecycle events."""
     template = instance.template
     completion = _related(instance, "completion")
     if completion is not None:

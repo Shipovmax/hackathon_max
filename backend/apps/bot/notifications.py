@@ -10,7 +10,7 @@ def _store_deep_link(instance) -> list[list[dict]]:
 
 
 def notify_owner_overdue(instance, client=None) -> None:
-    """Once per task when the tolerance expires without a completion (CLAUDE.md §5)."""
+    """Notify once when the task tolerance expires without a completion."""
     store = instance.template.store
     sender = client or MaxClient()
     sender.send_message(

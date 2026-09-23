@@ -1,4 +1,4 @@
-"""User-facing bot messages. Tone: short, no exclamation marks, a refusal always says who does it instead (CLAUDE.md §14)."""
+"""User-facing bot messages: short, calm, and with an actionable reason for every refusal."""
 
 
 def plural_ru(n: int, forms: tuple[str, str, str]) -> str:
