@@ -4,7 +4,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { apiGet } from '../api/client';
 import { useApi } from '../api/hooks';
-import type { DayTask, StoreDay as StoreDayData, TaskTemplateItem } from '../api/types';
+import type { DayTask, StoreDay as StoreDayData, TaskStatus, TaskTemplateItem } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
 import { Empty } from '../components/Empty';
 import { DateNav } from '../components/DateNav';
@@ -15,6 +15,14 @@ import { useToast } from '../components/Toast';
 import { StatusDot, TaskStatusBadge, taskTone } from '../components/StatusBadge';
 import { TaskEditor } from '../components/TaskEditor';
 import { formatRange, minutesOf, today } from '../lib/format';
+
+// Итог этих задач уже наступил: его записали, и правка задачи его не меняет.
+const SETTLED: TaskStatus[] = ['done_on_time', 'done_late', 'overdue', 'missed', 'unclaimed'];
+
+/** Задачу правят только пока её итог не наступил: прошлый день и закрытые задачи — история. */
+function isEditable(task: DayTask, date: string): boolean {
+  return date >= today() && !SETTLED.includes(task.status);
+}
 
 // Плановое время стоит слева, поэтому в подписи только то, что произошло.
 function subtitle(task: DayTask): string {
@@ -53,6 +61,10 @@ export function StoreDay() {
    * а список задач точки короткий, так что читаем его целиком.
    */
   const openTask = async (task: DayTask) => {
+    if (!isEditable(task, date)) {
+      toast.show('Итог этой задачи уже записан и не меняется. Настройки на будущие дни — в «Задачи точки»');
+      return;
+    }
     if (opening) return;
     setOpening(true);
     try {
@@ -140,7 +152,7 @@ export function StoreDay() {
                         <StatusDot tone={taskTone(task.status)} />
                       </span>
                     }
-                    showChevron
+                    showChevron={isEditable(task, date)}
                     onClick={() => openTask(task)}
                   />
                   {task.photo_url && (
