@@ -373,12 +373,14 @@ class ScheduleTests(OwnerApiTestCase):
         response = self.call("put", self.url(), self.draft([shift(self.anna, 8)]))
         self.assertEqual(response.status_code, 400)
 
-    def test_employee_of_another_store_or_a_dismissed_one_is_rejected(self):
+    def test_employee_of_another_store_is_rejected_and_a_dismissed_one_is_skipped(self):
         stranger = Employee.objects.create(store=self.other_owner(), name="Oleg")
         self.assertEqual(self.call("put", self.url(), self.draft([shift(stranger, 0)])).status_code, 400)
+        # Смену уволенного не сохраняем, но и сохранение остальных из-за неё не ломаем.
         self.igor.status = "dismissed"
         self.igor.save()
-        self.assertEqual(self.call("put", self.url(), self.draft([shift(self.igor, 0)])).status_code, 400)
+        self.assertEqual(self.call("put", self.url(), self.draft([shift(self.igor, 0)])).status_code, 200)
+        self.assertFalse(Shift.objects.filter(employee=self.igor).exists())
 
     def test_malformed_body_is_a_clean_400(self):
         self.assertEqual(self.call("put", self.url(), {"week_start": MONDAY.isoformat()}).status_code, 400)
@@ -452,3 +454,88 @@ class ScheduleDaysOffTests(OwnerApiTestCase):
         draft = {"week_start": MONDAY.isoformat(), "shifts": [shift(self.anna, d, "09:00", "22:00") for d in range(5)]}
         response = self.call("post", f"/stores/{self.store.id}/schedule/coverage/", draft)
         self.assertEqual(response.json()["gaps"], [])
+
+
+class FormerEmployeeShiftsTests(OwnerApiTestCase):
+    """
+    Смены уволенного не должны мешать графику.
+
+    Случай с «Ленина, 14»: у убранного из списка сотрудника осталась смена на неделе,
+    приложение присылало её вместе с остальными, и правка смены Якова падала с
+    «Сотрудник не найден на этой точке».
+    """
+
+    def url(self, suffix=""):
+        return f"/stores/{self.store.id}/schedule/{suffix}"
+
+    def add_shift(self, employee, offset, start=9, end=17):
+        return Shift.objects.create(
+            employee=employee,
+            store=self.store,
+            date=MONDAY + dt.timedelta(days=offset),
+            start_time=dt.time(start),
+            end_time=dt.time(end),
+            status=ShiftStatus.PUBLISHED,
+        )
+
+    def test_editing_the_week_works_with_a_former_employees_shift_in_it(self):
+        past = self.add_shift(self.igor, 0)
+        self.igor.status = "removed"
+        self.igor.save(update_fields=["status"])
+
+        week = self.call("get", self.url(f"?week={MONDAY}")).json()
+        # Как делает приложение: берёт смены недели, правит одну и присылает все.
+        shifts = week["shifts"] + [shift(self.anna, 1, "10:00", "18:00")]
+        response = self.call("put", self.url(), {"week_start": MONDAY.isoformat(), "shifts": shifts})
+
+        self.assertEqual(response.status_code, 200, response.json())
+        self.assertEqual([s["employee_id"] for s in response.json()["shifts"]], [self.anna.id])
+        # Прошлая смена уволенного — история, её сохранение графика не стирает.
+        self.assertTrue(Shift.objects.filter(pk=past.pk).exists())
+
+    def test_app_opened_before_the_dismissal_can_still_save(self):
+        """Старая вкладка присылает смену уже уволенного — сервер её пропускает, а не падает."""
+        self.igor.status = "dismissed"
+        self.igor.save(update_fields=["status"])
+        draft = {"week_start": MONDAY.isoformat(), "shifts": [shift(self.igor, 2), shift(self.anna, 2)]}
+
+        response = self.call("put", self.url(), draft)
+
+        self.assertEqual(response.status_code, 200, response.json())
+        self.assertEqual(Shift.objects.filter(employee=self.igor).count(), 0)
+        self.assertEqual(Shift.objects.filter(employee=self.anna).count(), 1)
+
+    def test_week_shows_only_working_employees_and_their_shifts(self):
+        self.add_shift(self.igor, 3)
+        self.igor.status = "dismissed"
+        self.igor.save(update_fields=["status"])
+
+        week = self.call("get", self.url(f"?week={MONDAY}")).json()
+
+        self.assertEqual([e["name"] for e in week["employees"]], ["Anna"])
+        self.assertEqual(week["shifts"], [])
+
+    def test_employee_from_another_store_is_still_refused(self):
+        stranger = Employee.objects.create(store=self.other_owner(), name="Oleg")
+        draft = {"week_start": MONDAY.isoformat(), "shifts": [shift(stranger, 0)]}
+        self.assertEqual(self.call("put", self.url(), draft).status_code, 400)
+
+    def test_dismissal_cancels_future_shifts_and_keeps_the_past(self):
+        yesterday = self.add_shift(self.igor, 0)
+        today = self.add_shift(self.igor, 1)
+        tomorrow = self.add_shift(self.igor, 2)
+
+        with self.at(12, day=MONDAY + dt.timedelta(days=1)):
+            self.assertEqual(self.call("post", f"/employees/{self.igor.id}/dismiss/").status_code, 200)
+
+        remaining = set(Shift.objects.filter(employee=self.igor).values_list("pk", flat=True))
+        self.assertEqual(remaining, {yesterday.pk, today.pk})
+        self.assertNotIn(tomorrow.pk, remaining)
+
+    def test_dismissed_employee_no_longer_counts_as_coverage(self):
+        with self.at(8, day=MONDAY):
+            self.add_shift(self.igor, 2, 9, 22)
+            self.call("post", f"/employees/{self.igor.id}/dismiss/")
+        week = self.call("get", self.url(f"?week={MONDAY}")).json()
+        wednesday = (MONDAY + dt.timedelta(days=2)).isoformat()
+        self.assertIn(wednesday, {gap["date"] for gap in week["gaps"]})

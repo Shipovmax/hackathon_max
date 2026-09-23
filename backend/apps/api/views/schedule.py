@@ -17,7 +17,7 @@ def parse_draft(request, store):
     if not isinstance(items, list):
         raise bad_request("Не передан список смен")
 
-    people = {employee.id: employee for employee in store.employees.filter(status=EmployeeStatus.ACTIVE)}
+    people = {employee.id: employee for employee in store.employees.all()}
     dates = set(week_dates(week_start))
     parsed = []
     for item in items:
@@ -26,6 +26,10 @@ def parse_draft(request, store):
         employee = people.get(item.get("employee_id"))
         if employee is None:
             raise bad_request("Сотрудник не найден на этой точке")
+        # Смены уволенных график не правит: прошлые остаются историей, а приложение,
+        # открытое до увольнения, могло прислать их вместе с остальными.
+        if employee.status != EmployeeStatus.ACTIVE:
+            continue
         day = parse_date(item.get("date"))
         if day not in dates:
             raise bad_request("Смена выходит за пределы выбранной недели")
@@ -46,7 +50,10 @@ def save_week(store, week_start, parsed, *, publish: bool) -> None:
     keep_published = publish or week_status(store, week_start) == "published"
     status = ShiftStatus.PUBLISHED if keep_published else ShiftStatus.DRAFT
     with transaction.atomic():
-        Shift.objects.filter(store=store, date__in=week_dates(week_start)).delete()
+        # Заменяем смены только работающих: смены уволенных — история, её не трогаем.
+        Shift.objects.filter(
+            store=store, date__in=week_dates(week_start), employee__status=EmployeeStatus.ACTIVE
+        ).delete()
         Shift.objects.bulk_create(
             Shift(
                 employee=employee, store=store, date=day, start_time=start, end_time=end, status=status
