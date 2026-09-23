@@ -27,11 +27,24 @@ def _related(instance: TaskInstance, name: str):
     return getattr(instance, name, None)
 
 
+DONE_STATUSES = (TaskStatus.DONE_ON_TIME, TaskStatus.DONE_LATE)
+
+
 def evaluate_status(instance: TaskInstance, now: datetime) -> str:
-    """Status the task has at `now`, derived from what was actually recorded (CLAUDE.md, section 5)."""
+    """
+    Status the task has at `now`, derived from what was actually recorded (CLAUDE.md, section 5).
+
+    Итог, который уже наступил, по текущим настройкам задачи не пересчитывается. Владелец
+    может поднять допуск или сдвинуть время — это план на будущее. Вчерашнее опоздание
+    от этого не становится «вовремя», а просрочка, о которой ему уже сообщили, не исчезает.
+    """
     template = instance.template
     completion = _related(instance, "completion")
     if completion is not None:
+        # Вердикт записан в момент отметки, см. mark_done.
+        if instance.status in DONE_STATUSES:
+            return instance.status
+        # Отметки, сделанные до того, как вердикт стали записывать.
         late = completion.late_minutes > template.tolerance_minutes
         return TaskStatus.DONE_LATE if late else TaskStatus.DONE_ON_TIME
 
@@ -45,6 +58,14 @@ def evaluate_status(instance: TaskInstance, now: datetime) -> str:
         and now - instance.awaiting_photo_since <= timedelta(minutes=settings.PHOTO_WAIT_MINUTES)
     ):
         return TaskStatus.AWAITING_PHOTO
+
+    # Владельцу уже сообщили: задачу не сделали в срок или её никто не взял. Это факт,
+    # и правка задачи задним числом его не отменяет.
+    if instance.overdue_notified_at is not None:
+        if not template.requires_claim:
+            return TaskStatus.MISSED if past_day else TaskStatus.OVERDUE
+        if _related(instance, "claim") is None:
+            return TaskStatus.UNCLAIMED
 
     if template.requires_claim and _related(instance, "claim") is None:
         if now >= planned:
@@ -80,9 +101,12 @@ def mark_done(
         if photo:
             completion.photo.save(f"task-{instance.id}.jpg", ContentFile(photo), save=False)
         completion.save()
-        instance.status = (
-            TaskStatus.DONE_LATE if late > template.tolerance_minutes else TaskStatus.DONE_ON_TIME
-        )
+        # Вердикт фиксируем сейчас и больше не пересчитываем. Если владельцу уже сообщили
+        # о просрочке, отметка — опоздание, даже если допуск потом увеличили: срок, о котором
+        # он узнал, прошёл.
+        overdue_reported = instance.overdue_notified_at is not None and not template.requires_claim
+        was_late = late > template.tolerance_minutes or overdue_reported
+        instance.status = TaskStatus.DONE_LATE if was_late else TaskStatus.DONE_ON_TIME
         instance.awaiting_photo_employee = None
         instance.awaiting_photo_since = None
         instance.save(update_fields=["status", "awaiting_photo_employee", "awaiting_photo_since"])

@@ -9,7 +9,7 @@ from apps.core.domain.lifecycle import (
     planned_at,
 )
 from apps.core.domain.day import day_tasks
-from apps.core.models import Claim, Employee, TaskInstance, TaskStatus
+from apps.core.models import Claim, Completion, Employee, TaskInstance, TaskStatus
 
 from .helpers import make_network, make_store, make_template, moscow
 
@@ -127,3 +127,81 @@ class StoreDaysOffTests(TestCase):
         next_week = DAY + dt.timedelta(days=7)
         rows = day_tasks(self.store, next_week, moscow(12))
         self.assertEqual(rows, [])
+
+
+class FrozenHistoryTests(TestCase):
+    """
+    Правка задачи — план на будущее, а не переписывание прошлого.
+
+    Раньше статус пересчитывался по текущему допуску: подняли допуск с 15 до 240 минут —
+    и вчерашнее опоздание стало «вовремя».
+    """
+
+    def setUp(self):
+        self.store = make_store(make_network())
+        self.employee = Employee.objects.create(store=self.store, name="Anna")
+        self.template = make_template(self.store, "Opening", at=(9, 0), tolerance=15)
+        self.instance = ensure_instances(self.store, DAY)[0]
+
+    def edit(self, **fields):
+        for name, value in fields.items():
+            setattr(self.template, name, value)
+        self.template.save()
+        self.instance.refresh_from_db()
+
+    def status(self, hour, minute=0, day=DAY):
+        instance = TaskInstance.objects.select_related("template__store").get(pk=self.instance.pk)
+        return evaluate_status(instance, moscow(hour, minute, day))
+
+    def test_late_completion_stays_late_after_the_tolerance_is_raised(self):
+        mark_done(self.instance, self.employee, moscow(9, 40))
+        self.edit(tolerance_minutes=240)
+        self.assertEqual(self.status(12), TaskStatus.DONE_LATE)
+
+    def test_on_time_completion_stays_on_time_after_the_tolerance_is_lowered(self):
+        mark_done(self.instance, self.employee, moscow(9, 10))
+        self.edit(tolerance_minutes=0)
+        self.assertEqual(self.status(12), TaskStatus.DONE_ON_TIME)
+
+    def test_moving_the_planned_time_does_not_change_a_past_verdict(self):
+        mark_done(self.instance, self.employee, moscow(9, 40))
+        self.edit(planned_time=dt.time(10, 0))
+        self.assertEqual(self.status(12), TaskStatus.DONE_LATE)
+
+    def test_reported_overdue_stays_overdue_after_the_tolerance_is_raised(self):
+        self.instance.overdue_notified_at = moscow(9, 16)
+        self.instance.status = TaskStatus.OVERDUE
+        self.instance.save(update_fields=["overdue_notified_at", "status"])
+        self.edit(tolerance_minutes=240)
+        self.assertEqual(self.status(10), TaskStatus.OVERDUE)
+        self.assertEqual(self.status(10, day=DAY + dt.timedelta(days=1)), TaskStatus.MISSED)
+
+    def test_completing_a_reported_task_is_late_even_within_a_raised_tolerance(self):
+        """Владельцу уже сообщили о просрочке — поднятый потом допуск её не отменяет."""
+        self.instance.overdue_notified_at = moscow(9, 16)
+        self.instance.save(update_fields=["overdue_notified_at"])
+        self.edit(tolerance_minutes=240)
+        mark_done(self.instance, self.employee, moscow(9, 30))
+        self.assertEqual(self.status(12), TaskStatus.DONE_LATE)
+
+    def test_pending_task_still_follows_the_edited_plan(self):
+        """Не наступивший итог правке подчиняется: владелец дал смене больше времени."""
+        self.edit(tolerance_minutes=60)
+        self.assertEqual(self.status(9, 30), TaskStatus.SCHEDULED)
+
+    def test_reported_unclaimed_task_stays_unclaimed_after_moving_it_later(self):
+        delivery = make_template(self.store, "Delivery", at=(11, 0), claim=True)
+        instance = ensure_instances(self.store, DAY)
+        instance = next(i for i in instance if i.template_id == delivery.id)
+        instance.overdue_notified_at = moscow(11, 0)
+        instance.save(update_fields=["overdue_notified_at"])
+        delivery.planned_time = dt.time(16, 0)
+        delivery.save()
+        fresh = TaskInstance.objects.select_related("template__store").get(pk=instance.pk)
+        self.assertEqual(evaluate_status(fresh, moscow(12)), TaskStatus.UNCLAIMED)
+
+    def test_old_completion_without_a_recorded_verdict_is_still_judged(self):
+        Completion.objects.create(
+            instance=self.instance, employee=self.employee, completed_at=moscow(9, 40), late_minutes=40
+        )
+        self.assertEqual(self.status(12), TaskStatus.DONE_LATE)

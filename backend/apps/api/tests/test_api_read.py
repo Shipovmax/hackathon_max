@@ -205,3 +205,21 @@ class PhotoTests(OwnerApiTestCase):
         with override_settings(MEDIA_ROOT=self.media):
             response = self.call("get", f"/completions/{completion.id}/photo/", user_id=2002)
         self.assertEqual(response.status_code, 404)
+
+
+class HistoryIsNotRewrittenTests(OwnerApiTestCase):
+    """Сценарий из жалобы: опоздание, потом допуск подняли через приложение."""
+
+    def test_raising_the_tolerance_in_the_app_does_not_whitewash_a_late_task(self):
+        template = make_template(self.store, "Opening", at=(9, 0), tolerance=15)
+        mark_done(ensure_instances(self.store, DAY)[0], self.anna, moscow(9, 40))
+
+        response = self.call("patch", f"/task-templates/{template.id}/", {"tolerance_minutes": 240})
+        self.assertEqual(response.status_code, 200)
+
+        with self.at(12):
+            day = self.call("get", f"/stores/{self.store.id}/day/?date={DAY}").json()
+            dashboard = self.call("get", "/dashboard/").json()
+        self.assertEqual(day["tasks"][0]["status"], "done_late")
+        self.assertEqual(day["tasks"][0]["late_minutes"], 40)
+        self.assertEqual(dashboard["stores"][0]["health"], "late")
