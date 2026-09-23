@@ -1,7 +1,7 @@
 import { Button, CellHeader, CellList, CellSimple, Typography } from '@maxhub/max-ui';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { apiDelete, apiPost } from '../api/client';
+import { apiDelete, apiPatch, apiPost } from '../api/client';
 import { useAction, useApi } from '../api/hooks';
 import type { Person, StoreInput, StoreWithPeople } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
@@ -13,7 +13,7 @@ import { TimeField } from '../components/TimeField';
 import { Screen } from '../components/Screen';
 import { Sheet } from '../components/Sheet';
 import { useToast } from '../components/Toast';
-import { formatRange, isValidTime } from '../lib/format';
+import { formatRange, isValidTime, minutesOf, WEEKDAYS } from '../lib/format';
 
 const STATUS: Record<Person['status'], string> = {
   connected: 'в боте',
@@ -23,7 +23,8 @@ const STATUS: Record<Person['status'], string> = {
 
 export function People() {
   const state = useApi<StoreWithPeople[]>('/stores/');
-  const [newStore, setNewStore] = useState(false);
+  // Форма точки: 'new' — новая, объект — правка уже созданной.
+  const [storeForm, setStoreForm] = useState<StoreWithPeople | 'new' | null>(null);
   const [newEmployeeAt, setNewEmployeeAt] = useState<StoreWithPeople | null>(null);
   const [person, setPerson] = useState<{ store: StoreWithPeople; person: Person } | null>(null);
 
@@ -57,6 +58,14 @@ export function People() {
                 </CellHeader>
               }
             >
+              <CellSimple
+                height="compact"
+                before={<Icon name="clock" />}
+                title="Часы работы и выходные"
+                subtitle={`${formatRange(store.open_time, store.close_time)} · ${daysOffLabel(store.closed_weekdays)}`}
+                showChevron
+                onClick={() => setStoreForm(store)}
+              />
               {store.employees.length === 0 && (
                 <CellSimple title="Сотрудников пока нет" subtitle="Бот не сможет вести смену без людей" />
               )}
@@ -81,12 +90,12 @@ export function People() {
           ))}
 
           <div className="screen__block">
-            <Button variant="secondary" stretched onClick={() => setNewStore(true)}>
+            <Button variant="secondary" stretched onClick={() => setStoreForm('new')}>
               Добавить точку
             </Button>
           </div>
 
-          <StoreForm open={newStore} onClose={() => setNewStore(false)} onDone={() => { setNewStore(false); state.reload(); }} />
+          <StoreForm store={storeForm} onClose={() => setStoreForm(null)} onDone={() => { setStoreForm(null); state.reload(); }} />
           <EmployeeForm
             store={newEmployeeAt}
             onClose={() => setNewEmployeeAt(null)}
@@ -103,11 +112,55 @@ export function People() {
   );
 }
 
-function StoreForm({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+const BLANK_STORE: StoreInput = { name: '', address: '', open_time: '10:00', close_time: '22:00', closed_weekdays: [] };
+
+/** «выходные: сб, вс» — подпись под часами работы точки. */
+function daysOffLabel(days: number[]): string {
+  return days.length ? `выходные: ${days.map((day) => WEEKDAYS[day]).join(', ')}` : 'без выходных';
+}
+
+/**
+ * Точка: и новая, и уже созданная. Часы работы и выходные меняются со временем —
+ * летний график, новый выходной, — поэтому форма одна на оба случая.
+ */
+function StoreForm({
+  store,
+  onClose,
+  onDone,
+}: {
+  store: StoreWithPeople | 'new' | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const toast = useToast();
   const save = useAction();
-  const [form, setForm] = useState<StoreInput>({ name: '', address: '', open_time: '10:00', close_time: '22:00' });
+  const [form, setForm] = useState<StoreInput>(BLANK_STORE);
   const [problem, setProblem] = useState<string | null>(null);
+  const existing = store && store !== 'new' ? store : null;
+
+  useEffect(() => {
+    if (!store) return;
+    setForm(
+      store === 'new'
+        ? BLANK_STORE
+        : {
+            name: store.name,
+            address: store.address,
+            open_time: store.open_time,
+            close_time: store.close_time,
+            closed_weekdays: store.closed_weekdays,
+          },
+    );
+    setProblem(null);
+  }, [store]);
+
+  const toggleDay = (day: number) =>
+    setForm({
+      ...form,
+      closed_weekdays: form.closed_weekdays.includes(day)
+        ? form.closed_weekdays.filter((item) => item !== day)
+        : [...form.closed_weekdays, day].sort(),
+    });
 
   const submit = async () => {
     if (form.name.trim().length < 2) {
@@ -118,24 +171,54 @@ function StoreForm({ open, onClose, onDone }: { open: boolean; onClose: () => vo
       setProblem('Время работы в формате ЧЧ:ММ');
       return;
     }
-    const result = await save.run(() => apiPost<StoreWithPeople>('/stores/', { ...form, name: form.name.trim() }));
+    if (minutesOf(form.close_time) <= minutesOf(form.open_time)) {
+      setProblem('Магазин должен закрываться позже, чем открывается');
+      return;
+    }
+    if (form.closed_weekdays.length === 7) {
+      setProblem('Точка не может быть закрыта всю неделю');
+      return;
+    }
+    const body = { ...form, name: form.name.trim() };
+    const result = await save.run(() =>
+      existing
+        ? apiPatch<StoreWithPeople>(`/stores/${existing.id}/`, body)
+        : apiPost<StoreWithPeople>('/stores/', body),
+    );
     if (!result) return;
-    toast.show('Точка добавлена');
-    setForm({ name: '', address: '', open_time: '10:00', close_time: '22:00' });
-    setProblem(null);
+    toast.show(existing ? 'Точка сохранена' : 'Точка добавлена');
     onDone();
   };
 
   return (
-    <Sheet title="Новая точка" open={open} onClose={onClose}>
+    <Sheet title={existing ? existing.name : 'Новая точка'} open={Boolean(store)} onClose={onClose}>
       <TextField label="Название" value={form.name} onChange={(name) => setForm({ ...form, name })} placeholder="Ленина, 14" />
       <TextField label="Адрес" value={form.address} onChange={(address) => setForm({ ...form, address })} placeholder="ул. Ленина, 14" />
       <TimeField label="Открытие" value={form.open_time} onChange={(open_time) => setForm({ ...form, open_time })} />
       <TimeField label="Закрытие" value={form.close_time} onChange={(close_time) => setForm({ ...form, close_time })} />
+      <div className="field">
+        <Typography.Label variant="small">Выходные точки</Typography.Label>
+        <div className="weekdays" role="group" aria-label="Выходные точки">
+          {WEEKDAYS.map((label, day) => (
+            <button
+              key={label}
+              type="button"
+              className={form.closed_weekdays.includes(day) ? 'weekday weekday--off' : 'weekday'}
+              aria-pressed={form.closed_weekdays.includes(day)}
+              onClick={() => toggleDay(day)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <Typography.Label variant="small" className="field__hint">
+          В выходной задачи не ставятся, а пустой день в графике не считается окном
+        </Typography.Label>
+      </div>
       {problem && <div className="alert alert--bad">{problem}</div>}
       <ErrorNote error={save.error} />
       <Button stretched loading={save.running} onClick={submit}>
-        Добавить точку
+        {existing ? 'Сохранить' : 'Добавить точку'}
       </Button>
     </Sheet>
   );

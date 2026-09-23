@@ -5,7 +5,6 @@ from . import views
 # Endpoints the mini-app does not call yet stay as 501 stubs.
 STUBS = [
     ("network/", "network"),
-    ("stores/<int:store_id>/", "store-detail"),
 ]
 
 urlpatterns = [
@@ -13,6 +12,7 @@ urlpatterns = [
     path("me/", views.MeView.as_view(), name="me"),
     path("dashboard/", views.DashboardView.as_view(), name="dashboard"),
     path("stores/", views.StoreListView.as_view(), name="stores"),
+    path("stores/<int:store_id>/", views.StoreDetailView.as_view(), name="store-detail"),
     path("stores/<int:store_id>/day/", views.StoreDayView.as_view(), name="store-day"),
     path("stores/<int:store_id>/employees/", views.StoreEmployeesView.as_view(), name="store-employees"),
     path(

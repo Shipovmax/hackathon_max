@@ -11,6 +11,7 @@ from apps.core.domain.lifecycle import (
     store_today,
     store_zone,
 )
+from apps.core.domain.permissions import shift_open_until
 from apps.core.models import (
     EmployeeStatus,
     Shift,
@@ -449,6 +450,10 @@ def escalate_unclaimed(now: datetime, client=None) -> None:
             instance.save(update_fields=["escalation_sent_at", "claim_prompt_mids"])
 
 
+# Итог смены, не отправленный за полсуток, уже никому не нужен: бот лежал, смена прошла.
+SUMMARY_STALE_AFTER = timedelta(hours=12)
+
+
 def send_shift_summaries(now: datetime, client=None) -> None:
     """Shift-end summary «Выполнено N из M» for tasks that belonged to that employee's shift."""
     sender = client
@@ -459,7 +464,6 @@ def send_shift_summaries(now: datetime, client=None) -> None:
         employee__status=EmployeeStatus.ACTIVE,
         employee__account__isnull=False,
     ).values_list("id", flat=True)
-    boundary_tolerance = timedelta(minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES)
 
     for shift_id in shift_ids:
         with transaction.atomic():
@@ -473,14 +477,12 @@ def send_shift_summaries(now: datetime, client=None) -> None:
                 )
                 .first()
             )
-            if shift is None or shift.date != store_today(shift.store, now):
+            if shift is None:
                 continue
-            ends_at = datetime.combine(
-                shift.date,
-                shift.end_time,
-                tzinfo=store_zone(shift.store),
-            )
-            if now < ends_at + boundary_tolerance:
+            # Итог — когда смене уже нечего отмечать: после срока её последней задачи.
+            # Такой срок может перевалить за полночь, поэтому сверяем не дату, а окно.
+            open_until = shift_open_until(shift)
+            if not open_until <= now < open_until + SUMMARY_STALE_AFTER:
                 continue
 
             relevant = []

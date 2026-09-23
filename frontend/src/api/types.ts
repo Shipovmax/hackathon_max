@@ -10,7 +10,8 @@ export type TaskStatus =
   | 'unclaimed'
   | 'missed';
 
-export type StoreHealth = 'ok' | 'overdue' | 'unclaimed';
+/** ok — всё вовремя, late — сделано позже срока, overdue/unclaimed — не сделано. */
+export type StoreHealth = 'ok' | 'late' | 'overdue' | 'unclaimed';
 
 export interface Me {
   max_user_id: number;
@@ -52,6 +53,8 @@ export interface DayTask {
 export interface StoreDay {
   store: { id: number; name: string };
   date: string;
+  /** Выходной точки: ежедневных задач в этот день нет. */
+  closed: boolean;
   on_shift: { name: string; start: string; end: string }[];
   tasks: DayTask[];
 }
@@ -74,6 +77,8 @@ export interface Schedule {
   status: 'draft' | 'published';
   open_time: string;
   close_time: string;
+  /** Дни недели, когда точка закрыта: 0 — пн, 6 — вс. */
+  closed_weekdays: number[];
   employees: { id: number; name: string }[];
   shifts: ShiftInput[];
   gaps: Gap[];
@@ -116,10 +121,12 @@ export interface StoreWithPeople {
   address: string;
   open_time: string;
   close_time: string;
+  /** Дни недели, когда точка закрыта: 0 — пн, 6 — вс. */
+  closed_weekdays: number[];
   employees: Person[];
 }
 
-export type StoreInput = Pick<StoreWithPeople, 'name' | 'address' | 'open_time' | 'close_time'>;
+export type StoreInput = Pick<StoreWithPeople, 'name' | 'address' | 'open_time' | 'close_time' | 'closed_weekdays'>;
 
 export interface EmployeeInput {
   name: string;

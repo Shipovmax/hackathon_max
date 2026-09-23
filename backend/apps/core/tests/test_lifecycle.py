@@ -8,6 +8,7 @@ from apps.core.domain.lifecycle import (
     mark_done,
     planned_at,
 )
+from apps.core.domain.day import day_tasks
 from apps.core.models import Claim, Employee, TaskInstance, TaskStatus
 
 from .helpers import make_network, make_store, make_template, moscow
@@ -98,3 +99,31 @@ class LifecycleTests(TestCase):
         template.is_active = False
         template.save()
         self.assertEqual(ensure_instances(self.store, DAY), [])
+
+
+class StoreDaysOffTests(TestCase):
+    """В выходной точка закрыта: ежедневных задач нет, ложных просрочек тоже."""
+
+    def setUp(self):
+        self.store = make_store(make_network())
+        self.store.closed_weekdays = [DAY.weekday()]
+        self.store.save(update_fields=["closed_weekdays"])
+        make_template(self.store, "Opening", at=(9, 0))
+
+    def test_daily_tasks_are_not_created_on_a_day_off(self):
+        self.assertEqual(ensure_instances(self.store, DAY), [])
+        self.assertFalse(TaskInstance.objects.exists())
+
+    def test_daily_tasks_come_back_on_a_working_day(self):
+        tomorrow = DAY + dt.timedelta(days=1)
+        self.assertEqual([i.template.title for i in ensure_instances(self.store, tomorrow)], ["Opening"])
+
+    def test_one_time_task_on_a_day_off_stays(self):
+        """Разовую задачу владелец поставил на эту дату сам — значит, она нужна."""
+        make_template(self.store, "Inventory", at=(11, 0), one_time_on=DAY)
+        self.assertEqual([i.template.title for i in ensure_instances(self.store, DAY)], ["Inventory"])
+
+    def test_future_day_off_shows_no_daily_tasks(self):
+        next_week = DAY + dt.timedelta(days=7)
+        rows = day_tasks(self.store, next_week, moscow(12))
+        self.assertEqual(rows, [])

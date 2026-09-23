@@ -26,9 +26,9 @@ import {
   weekStart,
 } from '../lib/format';
 
-/** Сегодняшний столбец подсвечен, выходные приглушены — неделя читается сразу. */
-function cellClass(date: string, weekend: boolean): string {
-  return [date === today() && 'schedule__col--today', weekend && 'schedule__col--weekend']
+/** Сегодняшний столбец подсвечен, выходные точки приглушены — неделя читается сразу. */
+function cellClass(date: string, closed: boolean): string {
+  return [date === today() && 'schedule__col--today', closed && 'schedule__col--closed']
     .filter(Boolean)
     .join(' ');
 }
@@ -95,14 +95,24 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
       WEEKDAYS.map((label, index) => ({
         label,
         date: addDays(data.week_start, index),
-        weekend: index >= 5,
+        // Выходной — тот, что задал владелец точки, а не просто суббота с воскресеньем.
+        closed: data.closed_weekdays.includes(index),
       })),
-    [data.week_start],
+    [data.week_start, data.closed_weekdays],
   );
 
   // Пересчитываем окна сразу после правки — в том числе в уже опубликованной неделе.
   const gaps = useMemo(
-    () => (dirty ? findGaps(days.map((day) => day.date), shifts, data.open_time, data.close_time) : (serverGaps ?? [])),
+    () =>
+      dirty
+        ? findGaps(
+            days.map((day) => day.date),
+            shifts,
+            data.open_time,
+            data.close_time,
+            days.filter((day) => day.closed).map((day) => day.date),
+          )
+        : (serverGaps ?? []),
     [dirty, days, shifts, data.open_time, data.close_time, serverGaps],
   );
 
@@ -187,7 +197,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
 
         <Typography.Label variant="small">
           Рабочий день {formatRange(data.open_time, data.close_time)}. Нажмите на ячейку, чтобы задать смену. Пустая
-          ячейка — выходной.
+          ячейка — выходной сотрудника. Приглушённые дни — выходные точки, их покрывать не нужно.
         </Typography.Label>
 
         {data.employees.length === 0 ? (
@@ -203,9 +213,10 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
                 <tr>
                   <th />
                   {days.map((day) => (
-                    <th key={day.date} className={cellClass(day.date, day.weekend)}>
+                    <th key={day.date} className={cellClass(day.date, day.closed)}>
                       <span className="schedule__day">{day.label}</span>
                       <span className="schedule__date">{Number(day.date.slice(8))}</span>
+                      {day.closed && <span className="schedule__closed">вых.</span>}
                     </th>
                   ))}
                 </tr>
@@ -219,7 +230,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
                     {days.map((day) => {
                       const shift = shifts.find((item) => item.employee_id === employee.id && item.date === day.date);
                       return (
-                        <td key={day.date} className={cellClass(day.date, day.weekend)}>
+                        <td key={day.date} className={cellClass(day.date, day.closed)}>
                           <button
                             type="button"
                             className={`schedule__cell${shift ? ' schedule__cell--filled' : ''}`}
@@ -306,7 +317,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
 }
 
 interface CoverageStripProps {
-  days: { label: string; date: string }[];
+  days: { label: string; date: string; closed: boolean }[];
   gaps: Gap[];
   openTime: string;
   closeTime: string;
@@ -326,7 +337,7 @@ function CoverageStrip({ days, gaps, openTime, closeTime }: CoverageStripProps) 
       {days.map((day) => (
         <div className="coverage__day" key={day.date}>
           <span className="coverage__label">{day.label}</span>
-          <span className="coverage__bar">
+          <span className={day.closed ? 'coverage__bar coverage__bar--closed' : 'coverage__bar'}>
             {gaps
               .filter((gap) => gap.date === day.date)
               .map((gap) => (

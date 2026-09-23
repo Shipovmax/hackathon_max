@@ -447,17 +447,19 @@ def on_status(client, account) -> None:
             store=store,
             date=day,
             status=ShiftStatus.PUBLISHED,
-        ).order_by("start_time")
+        )
+        .select_related("store")
+        .order_by("start_time")
     )
 
-    def bounds(shift):
-        starts_at = datetime.combine(shift.date, shift.start_time, tzinfo=zone)
-        ends_at = datetime.combine(shift.date, shift.end_time, tzinfo=zone)
-        return starts_at - tolerance, ends_at + tolerance
-
-    current = next((shift for shift in shifts if bounds(shift)[0] <= now <= bounds(shift)[1]), None)
+    # Та же граница, что у отметки: смена открыта, пока не вышел срок её последней задачи.
+    current = next((shift for shift in shifts if board.is_running(shift, now)), None)
     if current is None:
-        upcoming = [shift for shift in shifts if now < bounds(shift)[0]]
+        upcoming = [
+            shift
+            for shift in shifts
+            if now < datetime.combine(shift.date, shift.start_time, tzinfo=zone) - tolerance
+        ]
         if upcoming:
             response = texts.status_not_started(_time(upcoming[0].start_time))
         elif shifts:

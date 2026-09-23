@@ -3,7 +3,7 @@
 // Хранилище изменяемое, поэтому редактирование работает так же, как будет с API,
 // но живёт до перезагрузки страницы.
 import { findGaps } from '../lib/coverage';
-import { addDays, DEFAULT_LEAD_MINUTES, earlierBy, minutesOf, today, weekStart } from '../lib/format';
+import { addDays, DEFAULT_LEAD_MINUTES, earlierBy, minutesOf, today, weekdayIndex, weekStart } from '../lib/format';
 import { ApiError } from './errors';
 import type {
   Dashboard,
@@ -96,6 +96,7 @@ const db: Db = {
       address: 'ул. Ленина, 14',
       open_time: '09:00',
       close_time: '22:00',
+      closed_weekdays: [],
       timezone: 'Europe/Moscow',
       employees: [
         person(1, 'Анна К.', 'connected'),
@@ -110,6 +111,7 @@ const db: Db = {
       address: 'ул. Гагарина, 3',
       open_time: '10:00',
       close_time: '21:00',
+      closed_weekdays: [6],
       timezone: 'Europe/Moscow',
       employees: [person(5, 'Ольга В.', 'connected'), person(6, 'Сергей Л.', 'connected')],
     },
@@ -119,6 +121,7 @@ const db: Db = {
       address: 'пр. Мира, 1',
       open_time: '10:00',
       close_time: '22:00',
+      closed_weekdays: [],
       timezone: 'Europe/Moscow',
       employees: [person(7, 'Марина Д.', 'connected')],
     },
@@ -212,8 +215,9 @@ function dayTasks(storeId: number, date: string): DayTask[] {
   const now = new Date();
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
+  const closed = store(storeId).closed_weekdays.includes(weekdayIndex(date));
   return (db.templates[storeId] ?? [])
-    .filter((item) => (item.kind === 'daily' ? true : item.on_date === date))
+    .filter((item) => (item.kind === 'daily' ? !closed : item.on_date === date))
     .sort((a, b) => minutesOf(a.planned_time) - minutesOf(b.planned_time))
     .map((item, index): DayTask => {
       const planned = minutesOf(item.planned_time);
@@ -262,6 +266,7 @@ function storeDay(storeId: number, date: string): StoreDay {
   return {
     store: { id: item.id, name: item.name },
     date,
+    closed: item.closed_weekdays.includes(weekdayIndex(date)),
     on_shift: onShift(storeId, date),
     tasks: dayTasks(storeId, date),
   };
@@ -273,17 +278,18 @@ function dashboard(date: string): Dashboard {
     const done = tasks.filter((task) => task.status.startsWith('done')).length;
     const unclaimed = tasks.some((task) => task.status === 'unclaimed');
     const overdue = tasks.some((task) => task.status === 'overdue' || task.status === 'missed');
+    const late = tasks.some((task) => task.status === 'done_late');
     const last = [...tasks].reverse().find((task) => task.done_at);
     return {
       id: item.id,
       name: item.name,
       done,
       total: tasks.length,
-      health: unclaimed ? 'unclaimed' : overdue ? 'overdue' : 'ok',
+      health: unclaimed ? 'unclaimed' : overdue ? 'overdue' : late ? 'late' : 'ok',
       last_event_label: last ? `последнее ${last.done_at}` : null,
     };
   });
-  const rank = (health: DashboardStore['health']) => (health === 'ok' ? 1 : 0);
+  const rank = (health: DashboardStore['health']) => ({ unclaimed: 0, overdue: 0, late: 1, ok: 2 })[health];
   return { date, stores: stores.sort((a, b) => rank(a.health) - rank(b.health)) };
 }
 
@@ -295,7 +301,8 @@ function gapsOf(storeId: number, week: string, shifts?: ShiftInput[]): Gap[] {
   const item = store(storeId);
   const dates = weekDates(week);
   const source = shifts ?? (db.shifts[storeId] ?? []).filter((shift) => dates.includes(shift.date));
-  return findGaps(dates, source, item.open_time, item.close_time);
+  const closed = dates.filter((date) => item.closed_weekdays.includes(weekdayIndex(date)));
+  return findGaps(dates, source, item.open_time, item.close_time, closed);
 }
 
 function schedule(storeId: number, week: string): Schedule {
@@ -306,6 +313,7 @@ function schedule(storeId: number, week: string): Schedule {
     status: db.published.includes(`${storeId}:${week}`) ? 'published' : 'draft',
     open_time: item.open_time,
     close_time: item.close_time,
+    closed_weekdays: item.closed_weekdays,
     employees: item.employees
       .filter((person) => person.status !== 'dismissed')
       .map((person) => ({ id: person.id, name: person.name })),
@@ -337,6 +345,14 @@ const routes: [string, RegExp, Handler][] = [
     db.templates[created.id] = [];
     db.shifts[created.id] = [];
     return created;
+  }],
+  ['PATCH', /^\/stores\/(\d+)\/$/, (p, _q, body) => {
+    const item = store(Number(p[0]));
+    const next = { ...item, ...(body as Partial<StoreInput>) };
+    if (minutesOf(next.close_time) <= minutesOf(next.open_time)) {
+      throw new ApiError(400, 'bad_request', 'Магазин должен закрываться позже, чем открывается');
+    }
+    return Object.assign(item, body);
   }],
   ['GET', /^\/stores\/(\d+)\/day\/$/, (p, query) => storeDay(Number(p[0]), query.get('date') ?? TODAY)],
   ['POST', /^\/stores\/(\d+)\/employees\/$/, (p, _q, body) => {

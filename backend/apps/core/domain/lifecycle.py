@@ -89,13 +89,25 @@ def mark_done(
     return completion
 
 
-def ensure_instances(store: Store, day: date) -> list[TaskInstance]:
-    """Create the day's TaskInstance rows from active templates. Safe to call repeatedly."""
-    templates = [
+def templates_for(store: Store, day: date) -> list:
+    """
+    Active templates that make up the store's task list for `day`.
+
+    Daily tasks skip the store's weekly days off: nobody opens a closed shop, and an
+    «overdue opening» on a Sunday would only produce a false alarm. A one-time task on a
+    day off stays — the owner put it on that date on purpose.
+    """
+    closed = store.is_closed_on(day)
+    return [
         template
         for template in store.task_templates.filter(is_active=True)
-        if template.kind == TaskKind.DAILY or template.on_date == day
+        if (template.kind == TaskKind.DAILY and not closed) or template.on_date == day
     ]
+
+
+def ensure_instances(store: Store, day: date) -> list[TaskInstance]:
+    """Create the day's TaskInstance rows from active templates. Safe to call repeatedly."""
+    templates = templates_for(store, day)
     for template in templates:
         TaskInstance.objects.get_or_create(template=template, date=day)
     return list(

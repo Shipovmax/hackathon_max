@@ -84,7 +84,8 @@ export function StoreDay() {
           backTo="/"
         >
           <div className="screen__block">
-            <DateNav date={date} onChange={setDate} />
+            {/* Вперёд листать можно: задачи будущих дней строятся по шаблонам точки. */}
+            <DateNav date={date} onChange={setDate} maxDate={null} />
           </div>
 
           <div className="screen__block">
@@ -115,8 +116,12 @@ export function StoreDay() {
             <div className="screen__block">
               <Empty
                 icon="clock"
-                title="Задач на этот день нет"
-                text="Задачи точки задаются шаблонами: ежедневные повторяются, разовая ставится на дату."
+                title={data.closed ? 'Выходной: точка закрыта' : 'Задач на этот день нет'}
+                text={
+                  data.closed
+                    ? 'Ежедневные задачи в выходной не ставятся. Выходные меняются в «Точки и сотрудники».'
+                    : 'Задачи точки задаются шаблонами: ежедневные повторяются, разовая ставится на дату.'
+                }
                 action={{ label: 'Задачи точки', onClick: () => navigate(`/stores/${data.store.id}/tasks`) }}
               />
             </div>

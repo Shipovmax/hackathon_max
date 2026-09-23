@@ -59,9 +59,29 @@ class DashboardTests(OwnerApiTestCase):
         self.assertIsNone(store["last_event_label"])
         self.assertEqual((store["done"], store["total"], store["health"]), (0, 1, "ok"))
 
-    def test_late_completion_counts_as_a_remark(self):
+    def test_late_completion_turns_the_store_yellow_not_red(self):
+        """Открытие отмечено в 09:40 при сроке 09:15: сделано, но поздно — жёлтый."""
         with self.at(8):
-            self.assertEqual(self.call("get", "/dashboard/").json()["stores"][0]["health"], "overdue")
+            stores = self.call("get", "/dashboard/").json()["stores"]
+        self.assertEqual([(s["name"], s["health"]) for s in stores], [("Lenina, 14", "late"), ("Gagarina, 3", "ok")])
+
+    def test_undone_task_is_red_even_next_to_a_late_one(self):
+        make_template(self.store, "Count the till", at=(10, 30), tolerance=15)
+        # В 10:00 кассу считать ещё рано — горит только жёлтое опоздание с открытием.
+        stores = {s["name"]: s for s in self.get(10).json()["stores"]}
+        self.assertEqual(stores["Lenina, 14"]["health"], "late")
+        # В 10:50 срок кассы вышел, отметки нет — красный.
+        with self.at(10, 50):
+            stores = {s["name"]: s for s in self.call("get", "/dashboard/").json()["stores"]}
+        self.assertEqual(stores["Lenina, 14"]["health"], "overdue")
+
+    def test_red_stores_come_before_yellow_ones(self):
+        yellow = make_store(self.network, "Arbat")
+        make_template(yellow, "Opening", at=(9, 0), tolerance=15)
+        mark_done(ensure_instances(yellow, DAY)[0], self.anna, moscow(9, 40))
+        # В 12:00 у «Ленина» никто не взял поставку — красный, «Арбат» опоздал — жёлтый.
+        names = [(s["name"], s["health"]) for s in self.get(12).json()["stores"]]
+        self.assertEqual(names, [("Lenina, 14", "unclaimed"), ("Arbat", "late"), ("Gagarina, 3", "ok")])
 
     def test_overdue_task_marks_the_store(self):
         make_template(self.calm, "Hall", at=(10, 0), tolerance=30)

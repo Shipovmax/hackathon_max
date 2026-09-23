@@ -371,6 +371,10 @@ select {
   --tint: rgba(31, 157, 76, 0.14);
 }
 
+.summary--warn {
+  --tint: rgba(217, 130, 43, 0.16);
+}
+
 .summary--bad {
   --tint: rgba(229, 72, 77, 0.16);
 }
@@ -626,8 +630,16 @@ select {
   font-size: 13px;
 }
 
-.schedule__col--weekend {
-  opacity: 0.75;
+/* Выходной точки: столбец приглушён, окном его не считаем. */
+.schedule__col--closed {
+  opacity: 0.55;
+}
+
+.schedule__closed {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
 }
 
 .schedule__col--today .schedule__day,
@@ -706,6 +718,11 @@ select {
   border-radius: 999px;
   background: linear-gradient(90deg, rgba(31, 157, 76, 0.45), rgba(31, 157, 76, 0.3));
   box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+/* В выходной покрывать нечего: полоса серая, без зелёного и без красных окон. */
+.coverage__bar--closed {
+  background: var(--sunken);
 }
 
 .coverage__gap {
@@ -806,6 +823,35 @@ select {
   font-size: 14px;
   color: var(--ink);
   opacity: 0.6;
+}
+
+/* Выходные точки: семь кнопок, выбранный день — «закрыто». ------------ */
+
+.weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.weekday {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.weekday--off {
+  font-weight: 600;
+  color: #fff;
+  background: var(--idle);
+  box-shadow: none;
 }
 
 /* Выбор времени: строка со значением и два колеса под ней ---------------- */

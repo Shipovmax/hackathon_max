@@ -27,6 +27,9 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
   // изменили снаружи (открылась панель, нажали стрелку): тогда колесо переставляем. Пока
   // человек крутит сам, новое значение уходит наружу и здесь совпадает с ним.
   const shown = useRef<number | null>(null);
+  // Строка, к которой колесо едет после тапа. Пока едет, промежуточные строки не выбираем:
+  // иначе тап по «08» от «22» мог остановиться на «18», если прокрутка запнулась.
+  const picking = useRef<number | null>(null);
 
   const moveTo = (target: number) => {
     const element = scroller.current;
@@ -46,21 +49,43 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
   const onScroll = () => {
     const element = scroller.current;
     if (!element) return;
-    const next = values[Math.min(values.length - 1, Math.max(0, Math.round(element.scrollTop / ITEM)))];
-    if (next !== shown.current) {
-      shown.current = next;
-      onChange(next);
+    if (picking.current === null) {
+      const next = values[Math.min(values.length - 1, Math.max(0, Math.round(element.scrollTop / ITEM)))];
+      if (next !== shown.current) {
+        shown.current = next;
+        onChange(next);
+      }
     }
     // Когда событий нет 140 мс, прокрутка закончилась. Если браузер не умеет
     // прилипание к строкам, колесо доводим до выбранной строки сами.
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
+      if (picking.current !== null) {
+        // Поездка к нажатой строке закончилась или прервалась — ставим колесо ровно на неё.
+        const target = picking.current;
+        picking.current = null;
+        moveTo(target);
+        return;
+      }
       if (!held.current && shown.current !== null) moveTo(shown.current);
     }, 140);
   };
 
+  /** Тап по строке выбирает её сразу, а прокрутка лишь показывает выбор. */
   const pick = (target: number) => {
-    scroller.current?.scrollTo({ top: values.indexOf(target) * ITEM, behavior: 'smooth' });
+    shown.current = target;
+    onChange(target);
+    const element = scroller.current;
+    if (!element) return;
+    const top = values.indexOf(target) * ITEM;
+    if (Math.abs(element.scrollTop - top) <= 1) return;
+    picking.current = target;
+    element.scrollTo({ top, behavior: 'smooth' });
+  };
+
+  // Человек взялся за колесо сам — тап больше не главный, промежуточные строки снова выбираются.
+  const takeOver = () => {
+    picking.current = null;
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -79,8 +104,10 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
       tabIndex={0}
       onScroll={onScroll}
       onKeyDown={onKeyDown}
+      onWheel={takeOver}
       onTouchStart={() => {
         held.current = true;
+        takeOver();
       }}
       onTouchEnd={() => {
         held.current = false;

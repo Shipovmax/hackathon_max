@@ -3,7 +3,7 @@ import datetime as dt
 from django.test import TestCase
 
 from apps.core.domain.lifecycle import ensure_instances, mark_done
-from apps.core.domain.permissions import MarkDenial, check_can_mark
+from apps.core.domain.permissions import MarkDenial, check_can_mark, shift_open_until
 from apps.core.models import Employee, ShiftStatus
 
 from .helpers import make_network, make_shift, make_store, make_template, moscow
@@ -127,3 +127,43 @@ class TaskWindowTests(TestCase):
     def test_finished_shift_still_wins_over_the_window(self):
         """Порядок отказов важен: сначала смена, потом окно задачи."""
         self.assertEqual(self.check(23, 30).denial, MarkDenial.ENDED)
+
+
+class ShiftEndTests(TestCase):
+    """
+    Закрытие в 22:00 при смене до 22:00.
+
+    Магазин закрыли ровно в десять, а подтверждают на пару минут позже — фото закрытой
+    двери делают, когда она закрыта. Смена для своей задачи открыта до её срока.
+    """
+
+    def setUp(self):
+        network = make_network()
+        self.store = make_store(network)
+        make_template(self.store, "Closing", at=(22, 0), tolerance=20, available_from=(21, 30))
+        # Задача следующей смены: её вечерний сотрудник закрывать не должен.
+        make_template(self.store, "Night check", at=(22, 10), tolerance=30)
+        instances = {i.template.title: i for i in ensure_instances(self.store, DAY)}
+        self.closing = instances["Closing"]
+        self.night = instances["Night check"]
+        self.igor = Employee.objects.create(store=self.store, name="Igor")
+        self.shift = make_shift(self.igor, start=(14, 0), end=(22, 0))
+
+    def test_own_task_can_be_confirmed_after_the_shift_ends(self):
+        self.assertTrue(check_can_mark(self.igor, self.closing, moscow(22, 3)).allowed)
+        self.assertTrue(check_can_mark(self.igor, self.closing, moscow(22, 19)).allowed)
+
+    def test_after_the_task_deadline_the_shift_is_over(self):
+        decision = check_can_mark(self.igor, self.closing, moscow(22, 21))
+        self.assertEqual(decision.denial, MarkDenial.ENDED)
+
+    def test_task_of_the_next_shift_is_not_extended(self):
+        decision = check_can_mark(self.igor, self.night, moscow(22, 8))
+        self.assertEqual(decision.denial, MarkDenial.ENDED)
+
+    def test_shift_stays_open_until_its_last_task_deadline(self):
+        self.assertEqual(shift_open_until(self.shift), moscow(22, 20))
+
+    def test_shift_without_late_tasks_closes_at_the_boundary(self):
+        early = make_shift(Employee.objects.create(store=self.store, name="Anna"), start=(9, 0), end=(14, 0))
+        self.assertEqual(shift_open_until(early), moscow(14, 5))

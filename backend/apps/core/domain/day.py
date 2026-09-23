@@ -6,12 +6,11 @@ from apps.core.models import (
     ShiftStatus,
     Store,
     TaskInstance,
-    TaskKind,
     TaskStatus,
     TaskTemplate,
 )
 
-from .lifecycle import ensure_instances, evaluate_status, store_today
+from .lifecycle import ensure_instances, evaluate_status, store_today, templates_for
 
 
 @dataclass
@@ -33,11 +32,7 @@ def day_tasks(store: Store, day: date, now: datetime) -> list[DayTaskRow]:
     if day == today:
         instances = ensure_instances(store, day)
     elif day > today:
-        templates = [
-            template
-            for template in store.task_templates.filter(is_active=True)
-            if template.kind == TaskKind.DAILY or template.on_date == day
-        ]
+        templates = templates_for(store, day)
         rows = [DayTaskRow(t.id, t, None, TaskStatus.SCHEDULED) for t in templates]
         return sorted(rows, key=lambda row: row.template.planned_time)
     else:

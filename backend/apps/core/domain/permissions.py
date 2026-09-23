@@ -6,7 +6,7 @@ from django.conf import settings
 
 from apps.core.models import EmployeeStatus, Shift, ShiftStatus
 
-from .lifecycle import store_today, store_zone
+from .lifecycle import planned_at, store_today, store_zone, templates_for
 
 
 class MarkDenial(str, Enum):
@@ -26,6 +26,28 @@ class MarkDecision:
     done_by: str | None = None
     done_at: time | None = None
     available_from: time | None = None
+
+
+def shift_open_until(shift) -> datetime:
+    """
+    До какого момента смена может отмечать свои задачи.
+
+    Обычно это конец смены плюс допуск на границе. Но если задача стоит на самый конец
+    смены — закрытие магазина в 22:00 при смене до 22:00, — подтверждают её уже после:
+    фото закрытой двери делают, когда дверь закрыта. Поэтому смена остаётся открытой
+    до срока последней своей задачи.
+    """
+    zone = store_zone(shift.store)
+    until = datetime.combine(shift.date, shift.end_time, tzinfo=zone) + timedelta(
+        minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES
+    )
+    for template in templates_for(shift.store, shift.date):
+        if shift.start_time <= template.planned_time <= shift.end_time:
+            deadline = datetime.combine(shift.date, template.planned_time, tzinfo=zone) + timedelta(
+                minutes=template.tolerance_minutes
+            )
+            until = max(until, deadline)
+    return until
 
 
 def check_can_mark(employee, instance, now: datetime) -> MarkDecision:
@@ -74,6 +96,15 @@ def check_can_mark(employee, instance, now: datetime) -> MarkDecision:
     for shift in shifts:
         start, end = bounds(shift)
         if start <= now <= end:
+            return MarkDecision(True, shift_start=shift.start_time, shift_end=shift.end_time)
+
+    # Задачу своей смены можно подтвердить и после её конца, пока не вышел срок задачи.
+    # Только свою: чужую задачу вечерней смены утренний сотрудник так не отметит.
+    deadline = planned_at(instance) + timedelta(minutes=instance.template.tolerance_minutes)
+    planned_time = instance.template.planned_time
+    for shift in shifts:
+        start, _ = bounds(shift)
+        if shift.start_time <= planned_time <= shift.end_time and start <= now <= deadline:
             return MarkDecision(True, shift_start=shift.start_time, shift_end=shift.end_time)
 
     upcoming = [shift for shift in shifts if now < bounds(shift)[0]]

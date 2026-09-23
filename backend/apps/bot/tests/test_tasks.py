@@ -476,6 +476,32 @@ class StatusHandlerTests(TestCase):
         with mock.patch("apps.bot.handlers.tasks.timezone.now", return_value=now):
             on_status(self.client, account or self.account)
 
+    def test_task_at_shift_end_stays_on_the_list_until_its_deadline(self):
+        """Закрыли в 17:00, подтверждают в 17:10: список и кнопка ещё на месте."""
+        closing = self.make_instance(
+            "Closing",
+            time(17),
+            requires_photo=False,
+            tolerance_minutes=20,
+            available_from=time(16, 30),
+        )
+
+        self.call(now=datetime(2026, 9, 21, 14, 10, tzinfo=timezone.utc))  # 17:10 по Москве
+
+        message = self.client.sent[0]
+        self.assertTrue(message["text"].startswith("Задачи смены"))
+        self.assertIn(f"done:{closing.id}", [row[0]["payload"] for row in message["buttons"]])
+
+    def test_after_the_last_deadline_the_shift_is_reported_as_ended(self):
+        self.make_instance("Closing", time(17), requires_photo=False, tolerance_minutes=20)
+
+        self.call(now=datetime(2026, 9, 21, 14, 25, tzinfo=timezone.utc))  # 17:25 по Москве
+
+        self.assertEqual(
+            self.client.sent[0]["text"],
+            "Ваша смена завершилась в 17:00. Итог придёт отдельным сообщением.",
+        )
+
     def test_task_before_its_window_is_listed_without_a_button(self):
         """
         Закрытие смены в 22:00 не должно закрываться в 10:03.

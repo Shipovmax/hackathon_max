@@ -6,8 +6,8 @@ import { Icon } from './Icon';
 interface DateNavProps {
   date: string;
   onChange: (date: string) => void;
-  /** Вперёд дальше сегодняшнего дня смотреть нечего: отметок там ещё нет. */
-  maxDate?: string;
+  /** Последний день, до которого можно листать вперёд; null — без ограничения. */
+  maxDate?: string | null;
 }
 
 export function DateNav({ date, onChange, maxDate = today() }: DateNavProps) {
@@ -23,7 +23,7 @@ export function DateNav({ date, onChange, maxDate = today() }: DateNavProps) {
         size="small"
         variant="secondary"
         aria-label="Следующий день"
-        disabled={date >= maxDate}
+        disabled={maxDate !== null && date >= maxDate}
         onClick={() => onChange(addDays(date, 1))}
       >
         <Icon name="forward" />
