@@ -8,9 +8,11 @@ interface DateNavProps {
   onChange: (date: string) => void;
   /** Последний день, до которого можно листать вперёд; null — без ограничения. */
   maxDate?: string | null;
+  /** Дата становится кнопкой нативного календаря. */
+  calendar?: boolean;
 }
 
-export function DateNav({ date, onChange, maxDate = today() }: DateNavProps) {
+export function DateNav({ date, onChange, maxDate = today(), calendar = false }: DateNavProps) {
   const label = date === today() ? `Сегодня, ${formatDate(date)}` : `${WEEKDAYS[weekdayIndex(date)]}, ${formatDate(date)}`;
 
   return (
@@ -18,7 +20,21 @@ export function DateNav({ date, onChange, maxDate = today() }: DateNavProps) {
       <IconButton size="small" variant="secondary" aria-label="Предыдущий день" onClick={() => onChange(addDays(date, -1))}>
         <Icon name="back" />
       </IconButton>
-      <Typography.Body variant="medium-strong">{label}</Typography.Body>
+      {calendar ? (
+        <label className="datenav__calendar">
+          <Typography.Body variant="medium-strong">{label}</Typography.Body>
+          <Icon name="calendar" />
+          <input
+            type="date"
+            value={date}
+            max={maxDate ?? undefined}
+            aria-label="Выбрать дату"
+            onChange={(event) => event.target.value && onChange(event.target.value)}
+          />
+        </label>
+      ) : (
+        <Typography.Body variant="medium-strong">{label}</Typography.Body>
+      )}
       <IconButton
         size="small"
         variant="secondary"

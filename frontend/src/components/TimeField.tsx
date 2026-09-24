@@ -23,6 +23,7 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const timer = useRef(0);
   const held = useRef(false);
+  const loop = [...values, ...values, ...values];
   // Строка, на которой стоит колесо. С внешним значением она расходится, только когда его
   // изменили снаружи (открылась панель, нажали стрелку): тогда колесо переставляем. Пока
   // человек крутит сам, новое значение уходит наружу и здесь совпадает с ним.
@@ -34,7 +35,9 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
   const moveTo = (target: number) => {
     const element = scroller.current;
     if (!element) return;
-    const top = Math.max(0, values.indexOf(target)) * ITEM;
+    // Всегда возвращаемся в среднюю копию списка. Сверху и снизу остаётся ещё
+    // по полному кругу, поэтому 23 → 00 и 59 → 00 ощущаются непрерывно.
+    const top = (values.length + Math.max(0, values.indexOf(target))) * ITEM;
     if (Math.abs(element.scrollTop - top) > 1) element.scrollTop = top;
   };
 
@@ -50,7 +53,15 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
     const element = scroller.current;
     if (!element) return;
     if (picking.current === null) {
-      const next = values[Math.min(values.length - 1, Math.max(0, Math.round(element.scrollTop / ITEM)))];
+      let rawIndex = Math.round(element.scrollTop / ITEM);
+      const logicalIndex = ((rawIndex % values.length) + values.length) % values.length;
+      // Не ждём, пока палец упрётся в физический край тройного списка. Незаметно
+      // переносим ту же цифру в среднюю копию и даём продолжить жест.
+      if (rawIndex < values.length / 2 || rawIndex >= values.length * 2.5) {
+        rawIndex = values.length + logicalIndex;
+        element.scrollTop = rawIndex * ITEM;
+      }
+      const next = values[logicalIndex];
       if (next !== shown.current) {
         shown.current = next;
         onChange(next);
@@ -72,12 +83,12 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
   };
 
   /** Тап по строке выбирает её сразу, а прокрутка лишь показывает выбор. */
-  const pick = (target: number) => {
+  const pick = (target: number, renderedIndex: number) => {
     shown.current = target;
     onChange(target);
     const element = scroller.current;
     if (!element) return;
-    const top = values.indexOf(target) * ITEM;
+    const top = renderedIndex * ITEM;
     if (Math.abs(element.scrollTop - top) <= 1) return;
     picking.current = target;
     element.scrollTo({ top, behavior: 'smooth' });
@@ -91,8 +102,9 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
     event.preventDefault();
-    const index = values.indexOf(value) + (event.key === 'ArrowUp' ? -1 : 1);
-    onChange(values[Math.min(values.length - 1, Math.max(0, index))]);
+    const step = event.key === 'ArrowUp' ? -1 : 1;
+    const index = (values.indexOf(value) + step + values.length) % values.length;
+    onChange(values[index]);
   };
 
   return (
@@ -118,17 +130,21 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
     >
       {/* Пустые поля сверху и снизу нужны, чтобы первую и последнюю строку можно было поставить по центру. */}
       <div className="wheel__pad" aria-hidden="true" />
-      {values.map((item) => (
-        <div
-          key={item}
-          role="option"
-          aria-selected={item === value}
-          className={item === value ? 'wheel__item wheel__item--on' : 'wheel__item'}
-          onClick={() => pick(item)}
-        >
-          {pad(item)}
-        </div>
-      ))}
+      {loop.map((item, index) => {
+        const accessible = index >= values.length && index < values.length * 2;
+        return (
+          <div
+            key={`${index}-${item}`}
+            role={accessible ? 'option' : undefined}
+            aria-hidden={accessible ? undefined : true}
+            aria-selected={accessible ? item === value : undefined}
+            className={item === value ? 'wheel__item wheel__item--on' : 'wheel__item'}
+            onClick={() => pick(item, index)}
+          >
+            {pad(item)}
+          </div>
+        );
+      })}
       <div className="wheel__pad" aria-hidden="true" />
     </div>
   );

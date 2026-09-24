@@ -4,8 +4,15 @@ const pad = (n: number) => String(n).padStart(2, '0');
 export const WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 
 export function formatRange(start: string, end: string): string {
-  if (start.endsWith(':00') && end.endsWith(':00')) return `${hour(start)}–${hour(end)}`;
-  return `${start}–${end}`;
+  // В текущем API 23:59 — совместимый эквивалент конца дня. В интерфейсе человек
+  // видит привычную полночь, а серверу не приходится сравнивать два разных дня.
+  const visibleEnd = end === '23:59' ? '00:00' : end;
+  if (start.endsWith(':00') && visibleEnd.endsWith(':00')) return `${hour(start)}–${hour(visibleEnd)}`;
+  return `${start}–${visibleEnd}`;
+}
+
+export function formatBusinessHours(start: string, end: string): string {
+  return start === '00:00' && end === '23:59' ? 'круглосуточно' : formatRange(start, end);
 }
 
 export function formatDate(iso: string): string {

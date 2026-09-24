@@ -13,7 +13,7 @@ import { TimeField } from '../components/TimeField';
 import { Screen } from '../components/Screen';
 import { Sheet } from '../components/Sheet';
 import { useToast } from '../components/Toast';
-import { formatRange, isValidTime, minutesOf, WEEKDAYS } from '../lib/format';
+import { formatBusinessHours, isValidTime, minutesOf, plural, WEEKDAYS } from '../lib/format';
 
 const STATUS: Record<Person['status'], string> = {
   connected: 'в боте',
@@ -30,10 +30,15 @@ export function People() {
 
   return (
     <AsyncView state={state}>
-      {(stores) => (
+      {(stores) => {
+        const employeeCount = stores.reduce(
+          (sum, store) => sum + store.employees.filter((person) => person.status !== 'dismissed').length,
+          0,
+        );
+        return (
         <Screen
           title="Точки и сотрудники"
-          subtitle={`${stores.length} точек · ${stores.reduce((sum, store) => sum + store.employees.filter((p) => p.status !== 'dismissed').length, 0)} сотрудников`}
+          subtitle={`${stores.length} ${plural(stores.length, ['точка', 'точки', 'точек'])} · ${employeeCount} ${plural(employeeCount, ['сотрудник', 'сотрудника', 'сотрудников'])}`}
           back
           backTo="/"
         >
@@ -53,7 +58,7 @@ export function People() {
               className="people__store"
               mode="island"
               header={
-                <CellHeader after={<span className="muted">{formatRange(store.open_time, store.close_time)}</span>}>
+                <CellHeader after={<span className="muted">{formatBusinessHours(store.open_time, store.close_time)}</span>}>
                   {store.name}
                 </CellHeader>
               }
@@ -62,7 +67,7 @@ export function People() {
                 height="compact"
                 before={<Icon name="clock" />}
                 title="Часы работы и выходные"
-                subtitle={`${formatRange(store.open_time, store.close_time)} · ${daysOffLabel(store.closed_weekdays)}`}
+                subtitle={`${formatBusinessHours(store.open_time, store.close_time)} · ${daysOffLabel(store.closed_weekdays)}`}
                 showChevron
                 onClick={() => setStoreForm(store)}
               />
@@ -107,7 +112,8 @@ export function People() {
             onDone={() => { setPerson(null); state.reload(); }}
           />
         </Screen>
-      )}
+        );
+      }}
     </AsyncView>
   );
 }
@@ -137,6 +143,7 @@ function StoreForm({
   const [form, setForm] = useState<StoreInput>(BLANK_STORE);
   const [problem, setProblem] = useState<string | null>(null);
   const existing = store && store !== 'new' ? store : null;
+  const alwaysOpen = form.open_time === '00:00' && (form.close_time === '00:00' || form.close_time === '23:59');
 
   useEffect(() => {
     if (!store) return;
@@ -147,7 +154,7 @@ function StoreForm({
             name: store.name,
             address: store.address,
             open_time: store.open_time,
-            close_time: store.close_time,
+            close_time: store.close_time === '23:59' ? '00:00' : store.close_time,
             closed_weekdays: store.closed_weekdays,
           },
     );
@@ -171,7 +178,8 @@ function StoreForm({
       setProblem('Время работы в формате ЧЧ:ММ');
       return;
     }
-    if (minutesOf(form.close_time) <= minutesOf(form.open_time)) {
+    const closeTime = form.close_time === '00:00' ? '23:59' : form.close_time;
+    if (minutesOf(closeTime) <= minutesOf(form.open_time)) {
       setProblem('Магазин должен закрываться позже, чем открывается');
       return;
     }
@@ -179,7 +187,7 @@ function StoreForm({
       setProblem('Точка не может быть закрыта всю неделю');
       return;
     }
-    const body = { ...form, name: form.name.trim() };
+    const body = { ...form, name: form.name.trim(), close_time: closeTime };
     const result = await save.run(() =>
       existing
         ? apiPatch<StoreWithPeople>(`/stores/${existing.id}/`, body)
@@ -194,8 +202,35 @@ function StoreForm({
     <Sheet title={existing ? existing.name : 'Новая точка'} open={Boolean(store)} onClose={onClose}>
       <TextField label="Название" value={form.name} onChange={(name) => setForm({ ...form, name })} placeholder="Ленина, 14" />
       <TextField label="Адрес" value={form.address} onChange={(address) => setForm({ ...form, address })} placeholder="ул. Ленина, 14" />
-      <TimeField label="Открытие" value={form.open_time} onChange={(open_time) => setForm({ ...form, open_time })} />
-      <TimeField label="Закрытие" value={form.close_time} onChange={(close_time) => setForm({ ...form, close_time })} />
+      <label className="field field--row">
+        <span className="field__text">
+          <Typography.Label variant="small">Круглосуточно</Typography.Label>
+          <Typography.Label variant="small" className="field__hint">Без закрытия между сменами</Typography.Label>
+        </span>
+        <input
+          type="checkbox"
+          className="switch"
+          checked={alwaysOpen}
+          onChange={(event) =>
+            setForm({
+              ...form,
+              open_time: event.target.checked ? '00:00' : '10:00',
+              close_time: event.target.checked ? '00:00' : '22:00',
+            })
+          }
+        />
+      </label>
+      {!alwaysOpen && (
+        <>
+          <TimeField label="Открытие" value={form.open_time} onChange={(open_time) => setForm({ ...form, open_time })} />
+          <TimeField
+            label="Закрытие"
+            value={form.close_time}
+            onChange={(close_time) => setForm({ ...form, close_time })}
+            hint="00:00 означает закрытие в полночь"
+          />
+        </>
+      )}
       <div className="field">
         <Typography.Label variant="small">Выходные точки</Typography.Label>
         <div className="weekdays" role="group" aria-label="Выходные точки">
