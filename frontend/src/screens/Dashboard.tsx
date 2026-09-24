@@ -35,6 +35,8 @@ export function Dashboard() {
         const tone = urgent.length ? 'bad' : late.length ? 'warn' : 'ok';
         const done = data.stores.reduce((sum, store) => sum + store.done, 0);
         const total = data.stores.reduce((sum, store) => sum + store.total, 0);
+        // Будущий день — это план: отмечать ещё нечего, поэтому ни «без замечаний», ни «0 из N».
+        const future = date > today();
         const previousProblems =
           date === today()
             ? (previous.data?.stores.filter((store) => store.health === 'overdue' || store.health === 'unclaimed') ?? [])
@@ -67,7 +69,7 @@ export function Dashboard() {
             }
           >
             <div className="screen__block">
-              <DateNav date={date} onChange={setDate} calendar />
+              <DateNav date={date} onChange={setDate} maxDate={null} calendar />
             </div>
 
             {previousProblems.length > 0 && (
@@ -84,20 +86,26 @@ export function Dashboard() {
 
             {data.stores.length > 0 && (
               <div className="screen__block">
-                <div className={`summary summary--${tone}`}>
+                <div className={`summary summary--${future ? 'ok' : tone}`}>
                   <Typography.Title variant="small-strong">
-                    {urgent.length
+                    {future
+                      ? total > 0
+                        ? `Запланировано ${total} ${plural(total, ['задача', 'задачи', 'задач'])}`
+                        : 'Задач на этот день нет'
+                      : urgent.length
                       ? `${urgent.length} ${plural(urgent.length, ['точка требует', 'точки требуют', 'точек требуют'])} внимания`
                       : late.length
                         ? `Всё выполнено, но ${late.length} ${plural(late.length, ['точка', 'точки', 'точек'])} с опозданием`
                         : 'Все точки без замечаний'}
                   </Typography.Title>
                   <Typography.Body variant="small">
-                    {total > 0
-                      ? `Выполнено ${done} из ${total} ${plural(total, ['задачи', 'задач', 'задач'])} за день`
-                      : date === today() ? 'Задач на сегодня нет' : 'Задач за этот день нет'}
+                    {future
+                      ? 'День ещё не наступил. Здесь задачи по расписанию, их можно поменять заранее'
+                      : total > 0
+                        ? `Выполнено ${done} из ${total} ${plural(total, ['задачи', 'задач', 'задач'])} за день`
+                        : date === today() ? 'Задач на сегодня нет' : 'Задач за этот день нет'}
                   </Typography.Body>
-                  <Progress done={done} total={total} tone={tone === 'ok' ? 'ok' : 'warn'} />
+                  {!future && <Progress done={done} total={total} tone={tone === 'ok' ? 'ok' : 'warn'} />}
                 </div>
               </div>
             )}
@@ -118,18 +126,22 @@ export function Dashboard() {
                 {data.stores.map((store) => (
                   <CellSimple
                     key={store.id}
-                    before={<StatusDot tone={healthTone(store.health)} />}
+                    before={<StatusDot tone={future ? 'idle' : healthTone(store.health)} />}
                     title={store.name}
                     subtitle={
-                      <span className="storerow">
-                        <span className="storerow__text">
-                          {store.done} из {store.total}
-                          {store.last_event_label ? ` · ${store.last_event_label}` : ''}
+                      future ? (
+                        `${store.total} ${plural(store.total, ['задача', 'задачи', 'задач'])} по плану`
+                      ) : (
+                        <span className="storerow">
+                          <span className="storerow__text">
+                            {store.done} из {store.total}
+                            {store.last_event_label ? ` · ${store.last_event_label}` : ''}
+                          </span>
+                          <Progress done={store.done} total={store.total} tone={healthTone(store.health)} />
                         </span>
-                        <Progress done={store.done} total={store.total} tone={healthTone(store.health)} />
-                      </span>
+                      )
                     }
-                    after={<HealthBadge health={store.health} />}
+                    after={future ? undefined : <HealthBadge health={store.health} />}
                     showChevron
                     onClick={() => navigate(`/stores/${store.id}${date === today() ? '' : `?date=${date}`}`)}
                   />
