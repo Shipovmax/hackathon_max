@@ -119,7 +119,10 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": ["apps.api.auth.MaxInitDataAuthentication"],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "apps.api.auth.MaxInitDataAuthentication",
+        "apps.api.auth.ReviewTokenAuthentication",
+    ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
@@ -133,6 +136,10 @@ MAX_CA_BUNDLE = _ca_bundle if _ca_bundle.is_absolute() else REPO_ROOT / _ca_bund
 PUBLIC_BASE_URL = env_str("PUBLIC_BASE_URL")
 
 INIT_DATA_MAX_AGE_SECONDS = env_int("INIT_DATA_MAX_AGE_SECONDS", 86400)
+# Автоматическая проверка хакатона (DATA-API.yaml): запросы с этим токеном идут от имени
+# тестового владельца. Пусто — вход по токену выключен.
+REVIEW_API_TOKEN = env_str("REVIEW_API_TOKEN")
+REVIEW_OWNER_MAX_ID = env_int("REVIEW_OWNER_MAX_ID", 900000001)
 # Напоминания отсчитываются от срока задачи: плановое время плюс её допуск.
 REMINDER_FIRST_MINUTES_BEFORE = env_int("REMINDER_FIRST_MINUTES_BEFORE", 15)
 REMINDER_FINAL_MINUTES_BEFORE = env_int("REMINDER_FINAL_MINUTES_BEFORE", 5)

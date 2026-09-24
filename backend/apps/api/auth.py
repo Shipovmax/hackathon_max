@@ -8,7 +8,7 @@ from django.conf import settings
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 
-from apps.core.models import MaxAccount, Role
+from apps.core.models import MaxAccount, Network, Role
 
 INIT_DATA_HEADER = "HTTP_X_MAX_INIT_DATA"
 
@@ -87,3 +87,42 @@ class MaxInitDataAuthentication(BaseAuthentication):
                 {"code": "not_owner", "detail": "The mini-app is available to owners only"}
             )
         return account, data
+
+
+REVIEW_NETWORK_NAME = "Сеть для проверки"
+
+
+class ReviewTokenAuthentication(BaseAuthentication):
+    """
+    Вход для автоматической проверки хакатона (DATA-API.yaml).
+
+    Робот проверки не открывает мини-приложение в MAX и не может подписать initData:
+    для этого нужен токен бота. Поэтому ему выдаётся отдельный токен REVIEW_API_TOKEN,
+    и запрос с `Authorization: Bearer <токен>` работает от имени тестового владельца
+    REVIEW_OWNER_MAX_ID. У этого владельца своя сеть, до чужих точек он не достаёт.
+    Пустой REVIEW_API_TOKEN выключает этот вход.
+    """
+
+    keyword = "Bearer"
+
+    def authenticate_header(self, request):
+        return self.keyword
+
+    def authenticate(self, request):
+        header = request.META.get("HTTP_AUTHORIZATION", "")
+        scheme, _, token = header.partition(" ")
+        if scheme != self.keyword or not token:
+            return None
+        expected = settings.REVIEW_API_TOKEN
+        if not expected or not hmac.compare_digest(token.strip().encode(), expected.encode()):
+            raise AuthenticationFailed("invalid review token", code="invalid_review_token")
+
+        account, _ = MaxAccount.objects.get_or_create(
+            max_user_id=settings.REVIEW_OWNER_MAX_ID,
+            defaults={"first_name": "Проверка", "role": Role.OWNER},
+        )
+        if account.role != Role.OWNER:
+            account.role = Role.OWNER
+            account.save(update_fields=["role"])
+        Network.objects.get_or_create(owner=account, defaults={"name": REVIEW_NETWORK_NAME})
+        return account, None

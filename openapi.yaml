@@ -1,0 +1,636 @@
+openapi: 3.1.0
+info:
+  title: Контроль смен — API мини-приложения владельца
+  version: "1.0"
+  description: |
+    API, которым пользуется мини-приложение владельца в MAX: сводка по точкам, карточка дня,
+    сотрудники, задачи точки и график смен. Бот в MAX работает на тех же данных, но через
+    вебхуки/long polling MAX, а не через этот API.
+
+    Все ответы — JSON. Ошибки ввода приходят как 400 с полем `detail`, которое приложение
+    показывает человеку как есть. Владелец видит только свою сеть: чужая точка, сотрудник
+    или задача отвечают 404.
+
+    Вход:
+    * мини-приложение передаёт подписанный MAX `window.WebApp.initData` в заголовке
+      `X-Max-Init-Data` (подпись проверяется токеном бота, dev.max.ru/docs/webapps/validation);
+    * автоматическая проверка хакатона передаёт `Authorization: Bearer <REVIEW_API_TOKEN>`
+      и работает от имени отдельного тестового владельца со своей сетью.
+servers:
+  - url: https://task-controller.ru/api
+security:
+  - maxInitData: []
+  - reviewToken: []
+
+paths:
+  /health/:
+    get:
+      summary: Доступность API
+      security: []
+      responses:
+        "200":
+          description: Сервис работает
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, const: ok}
+
+  /me/:
+    get:
+      summary: Кто вошёл
+      responses:
+        "200":
+          description: Владелец и его сеть
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [max_user_id, first_name, role, network]
+                properties:
+                  max_user_id: {type: integer}
+                  first_name: {type: string}
+                  role: {type: string, enum: [owner]}
+                  network:
+                    oneOf:
+                      - $ref: "#/components/schemas/Ref"
+                      - type: "null"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/NotOwner"}
+
+  /dashboard/:
+    get:
+      summary: Сводка по всем точкам за день
+      description: Точки с проблемами идут первыми — красные (не взята, просрочена), затем жёлтые (сделано с опозданием), затем зелёные.
+      parameters:
+        - $ref: "#/components/parameters/Date"
+      responses:
+        "200":
+          description: Сводка
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [date, stores]
+                properties:
+                  date: {type: string, format: date}
+                  stores:
+                    type: array
+                    items: {$ref: "#/components/schemas/DashboardStore"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /stores/:
+    get:
+      summary: Точки сети с сотрудниками
+      responses:
+        "200":
+          description: Список точек по названию
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Store"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    post:
+      summary: Добавить точку
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/StoreInput"}
+      responses:
+        "201":
+          description: Точка создана
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Store"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /stores/{storeId}/:
+    parameters:
+      - $ref: "#/components/parameters/StoreId"
+    get:
+      summary: Одна точка
+      responses:
+        "200":
+          description: Точка
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Store"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      summary: Изменить название, адрес, часы работы или выходные
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreInput"
+              required: []
+      responses:
+        "200":
+          description: Точка после правки
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Store"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /stores/{storeId}/day/:
+    parameters:
+      - $ref: "#/components/parameters/StoreId"
+    get:
+      summary: Карточка дня точки
+      description: Задачи дня по времени — кто и когда отметил, опоздание, фото; кто на смене. Будущий день показывает, что будет по расписанию, ничего не сохраняя.
+      parameters:
+        - $ref: "#/components/parameters/Date"
+      responses:
+        "200":
+          description: День точки
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StoreDay"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /stores/{storeId}/employees/:
+    parameters:
+      - $ref: "#/components/parameters/StoreId"
+    post:
+      summary: Добавить сотрудника и выдать код приглашения
+      description: Сотрудник отправляет код боту в MAX и привязывается к точке.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 150}
+      responses:
+        "201":
+          description: Сотрудник с кодом приглашения
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Person"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /stores/{storeId}/task-templates/:
+    parameters:
+      - $ref: "#/components/parameters/StoreId"
+    get:
+      summary: Задачи точки
+      responses:
+        "200":
+          description: Действующие задачи по плановому времени
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/TaskTemplate"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      summary: Добавить задачу — ежедневную или разовую на дату
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TaskTemplateInput"}
+      responses:
+        "201":
+          description: Задача создана
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TaskTemplate"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /task-templates/{templateId}/:
+    parameters:
+      - $ref: "#/components/parameters/TemplateId"
+    patch:
+      summary: Изменить задачу
+      description: Меняет задачу на будущее. Итоги уже прошедших дней не пересчитываются.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskTemplateInput"
+              required: []
+      responses:
+        "200":
+          description: Задача после правки
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TaskTemplate"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Убрать задачу
+      description: Задача перестаёт появляться; история выполнений остаётся.
+      responses:
+        "204": {description: Задача убрана}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /stores/{storeId}/schedule/:
+    parameters:
+      - $ref: "#/components/parameters/StoreId"
+    get:
+      summary: График смен на неделю
+      parameters:
+        - name: week
+          in: query
+          required: false
+          description: Любой день нужной недели, YYYY-MM-DD. По умолчанию — текущая неделя.
+          schema: {type: string, format: date}
+      responses:
+        "200":
+          description: Неделя графика
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Schedule"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    put:
+      summary: Сохранить неделю графика
+      description: Заменяет смены работающих сотрудников за неделю. Опубликованная неделя остаётся опубликованной.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ScheduleDraft"}
+      responses:
+        "200":
+          description: Неделя после сохранения
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Schedule"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /stores/{storeId}/schedule/coverage/:
+    parameters:
+      - $ref: "#/components/parameters/StoreId"
+    post:
+      summary: Проверить черновик графика на незакрытые часы
+      description: Ничего не сохраняет — только считает окна, когда точка открыта, а на смене никого.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ScheduleDraft"}
+      responses:
+        "200":
+          description: Незакрытые окна
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [gaps]
+                properties:
+                  gaps:
+                    type: array
+                    items: {$ref: "#/components/schemas/Gap"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /stores/{storeId}/schedule/publish/:
+    parameters:
+      - $ref: "#/components/parameters/StoreId"
+    post:
+      summary: Сохранить и опубликовать неделю
+      description: После публикации бот начинает вести смены этой недели.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ScheduleDraft"}
+      responses:
+        "200":
+          description: Опубликованная неделя
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Schedule"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /employees/{employeeId}/invite/:
+    parameters:
+      - $ref: "#/components/parameters/EmployeeId"
+    post:
+      summary: Выдать новый код приглашения
+      responses:
+        "200":
+          description: Сотрудник с новым кодом
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Person"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /employees/{employeeId}/dismiss/:
+    parameters:
+      - $ref: "#/components/parameters/EmployeeId"
+    post:
+      summary: Отметить, что сотрудник уволен
+      description: Неиспользованный код и будущие смены удаляются, история отметок остаётся.
+      responses:
+        "200":
+          description: Уволенный сотрудник
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Person"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /employees/{employeeId}/:
+    parameters:
+      - $ref: "#/components/parameters/EmployeeId"
+    delete:
+      summary: Убрать уволенного из списка
+      responses:
+        "204": {description: Сотрудник убран из списка}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /completions/{completionId}/photo/:
+    parameters:
+      - name: completionId
+        in: path
+        required: true
+        schema: {type: integer}
+    get:
+      summary: Фото-подтверждение выполненной задачи
+      responses:
+        "200":
+          description: Изображение
+          content:
+            image/jpeg: {}
+            image/png: {}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+components:
+  securitySchemes:
+    maxInitData:
+      type: apiKey
+      in: header
+      name: X-Max-Init-Data
+      description: Строка window.WebApp.initData из MAX как есть.
+    reviewToken:
+      type: http
+      scheme: bearer
+      description: Токен автоматической проверки (REVIEW_API_TOKEN). Выдаётся организаторам отдельно.
+
+  parameters:
+    StoreId:
+      name: storeId
+      in: path
+      required: true
+      schema: {type: integer}
+    EmployeeId:
+      name: employeeId
+      in: path
+      required: true
+      schema: {type: integer}
+    TemplateId:
+      name: templateId
+      in: path
+      required: true
+      schema: {type: integer}
+    Date:
+      name: date
+      in: query
+      required: false
+      description: День, YYYY-MM-DD. По умолчанию — сегодня.
+      schema: {type: string, format: date}
+
+  responses:
+    BadRequest:
+      description: Неверный ввод; detail — текст для человека
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Unauthorized:
+      description: Нет или неверные данные входа
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotOwner:
+      description: Вошёл не владелец
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: Такого нет в сети владельца
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Conflict:
+      description: Действие недоступно в текущем состоянии
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+
+  schemas:
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail: {type: string}
+
+    Ref:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+    Time:
+      type: string
+      pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+      examples: ["09:00"]
+
+    Weekdays:
+      type: array
+      description: Выходные точки, 0 — понедельник, 6 — воскресенье
+      items: {type: integer, minimum: 0, maximum: 6}
+      maxItems: 6
+
+    StoreInput:
+      type: object
+      required: [name, open_time, close_time]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        address: {type: string, maxLength: 300}
+        open_time: {$ref: "#/components/schemas/Time"}
+        close_time: {$ref: "#/components/schemas/Time"}
+        closed_weekdays: {$ref: "#/components/schemas/Weekdays"}
+
+    Store:
+      type: object
+      required: [id, name, address, open_time, close_time, closed_weekdays, employees]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        address: {type: string}
+        open_time: {$ref: "#/components/schemas/Time"}
+        close_time: {$ref: "#/components/schemas/Time"}
+        closed_weekdays: {$ref: "#/components/schemas/Weekdays"}
+        employees:
+          type: array
+          items: {$ref: "#/components/schemas/Person"}
+
+    Person:
+      type: object
+      required: [id, name, status, invite_code]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        status: {type: string, enum: [invited, connected, dismissed]}
+        invite_code:
+          type: [string, "null"]
+          description: Код для бота, пока сотрудник не привязался
+
+    DashboardStore:
+      type: object
+      required: [id, name, done, total, health, last_event_label]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        done: {type: integer}
+        total: {type: integer}
+        health: {type: string, enum: [unclaimed, overdue, late, ok]}
+        last_event_label: {type: [string, "null"]}
+
+    DayTask:
+      type: object
+      required: [id, template_id, title, planned_time, available_from, kind, status]
+      properties:
+        id: {type: string}
+        template_id: {type: integer}
+        title: {type: string}
+        planned_time: {$ref: "#/components/schemas/Time"}
+        available_from: {$ref: "#/components/schemas/Time"}
+        kind: {type: string, enum: [daily, one_time]}
+        status: {type: string, enum: [scheduled, reminded, awaiting_photo, done_on_time, done_late, overdue, unclaimed, missed]}
+        late_minutes: {type: [integer, "null"]}
+        done_by: {type: [string, "null"]}
+        done_at: {type: [string, "null"]}
+        claimed_by: {type: [string, "null"]}
+        photo_url: {type: [string, "null"]}
+
+    StoreDay:
+      type: object
+      required: [store, date, closed, on_shift, tasks]
+      properties:
+        store: {$ref: "#/components/schemas/Ref"}
+        date: {type: string, format: date}
+        closed: {type: boolean}
+        on_shift:
+          type: array
+          items:
+            type: object
+            required: [name, start, end]
+            properties:
+              name: {type: string}
+              start: {$ref: "#/components/schemas/Time"}
+              end: {$ref: "#/components/schemas/Time"}
+        tasks:
+          type: array
+          items: {$ref: "#/components/schemas/DayTask"}
+
+    TaskTemplateInput:
+      type: object
+      required: [title, planned_time]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 200}
+        kind: {type: string, enum: [daily, one_time], default: daily}
+        on_date: {type: [string, "null"], format: date, description: Обязательна для разовой задачи}
+        planned_time: {$ref: "#/components/schemas/Time"}
+        available_from:
+          $ref: "#/components/schemas/Time"
+          description: С какого времени можно отмечать; по умолчанию за 30 минут до планового
+        tolerance_minutes: {type: integer, minimum: 0, maximum: 240, default: 15}
+        requires_photo: {type: boolean, default: true}
+        requires_claim: {type: boolean, default: false, description: Задачу нужно сначала взять кнопкой «Беру»}
+
+    TaskTemplate:
+      type: object
+      required: [id, title, kind, planned_time, available_from, on_date, tolerance_minutes, requires_photo, requires_claim]
+      properties:
+        id: {type: integer}
+        title: {type: string}
+        kind: {type: string, enum: [daily, one_time]}
+        planned_time: {$ref: "#/components/schemas/Time"}
+        available_from: {$ref: "#/components/schemas/Time"}
+        on_date: {type: [string, "null"], format: date}
+        tolerance_minutes: {type: integer}
+        requires_photo: {type: boolean}
+        requires_claim: {type: boolean}
+
+    ShiftItem:
+      type: object
+      required: [employee_id, date, start, end]
+      properties:
+        employee_id: {type: integer}
+        date: {type: string, format: date}
+        start: {$ref: "#/components/schemas/Time"}
+        end: {$ref: "#/components/schemas/Time"}
+
+    ScheduleDraft:
+      type: object
+      required: [week_start, shifts]
+      properties:
+        week_start: {type: string, format: date, description: Любой день недели; берётся её понедельник}
+        shifts:
+          type: array
+          items: {$ref: "#/components/schemas/ShiftItem"}
+
+    Gap:
+      type: object
+      required: [date, start, end]
+      properties:
+        date: {type: string, format: date}
+        start: {$ref: "#/components/schemas/Time"}
+        end: {$ref: "#/components/schemas/Time"}
+
+    Schedule:
+      type: object
+      required: [week_start, status, open_time, close_time, closed_weekdays, employees, shifts, gaps]
+      properties:
+        week_start: {type: string, format: date}
+        status: {type: string, enum: [draft, published]}
+        open_time: {$ref: "#/components/schemas/Time"}
+        close_time: {$ref: "#/components/schemas/Time"}
+        closed_weekdays: {$ref: "#/components/schemas/Weekdays"}
+        employees:
+          type: array
+          items: {$ref: "#/components/schemas/Ref"}
+        shifts:
+          type: array
+          items: {$ref: "#/components/schemas/ShiftItem"}
+        gaps:
+          type: array
+          items: {$ref: "#/components/schemas/Gap"}
