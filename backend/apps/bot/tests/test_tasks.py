@@ -160,6 +160,25 @@ class DoneCallbackTests(TestCase):
         self.assertIn("✓ 10:00 Open store — Anna в 10:03, вовремя", message["text"])
         self.assertEqual(message["buttons"], [])
 
+    def test_colleague_who_blocked_the_bot_does_not_cut_off_the_others(self):
+        blocked = MaxAccount.objects.create(max_user_id=102)
+        self.make_shift(Employee.objects.create(store=self.store, name="Boris", account=blocked), time(9), time(17))
+        igor_account = MaxAccount.objects.create(max_user_id=104)
+        self.make_shift(Employee.objects.create(store=self.store, name="Igor", account=igor_account), time(9), time(17))
+        deliver = self.client.send_message
+
+        def refuse_blocked(**kwargs):
+            if kwargs["user_id"] == blocked.max_user_id:
+                raise MaxApiError(403, "chat.denied")
+            deliver(**kwargs)
+
+        self.client.send_message = refuse_blocked
+        self.call()
+
+        self.assertEqual([call["user_id"] for call in self.client.sent], [igor_account.max_user_id])
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.status, TaskStatus.DONE_ON_TIME)
+
     def test_marked_within_tolerance_is_not_called_late(self):
         """late_minutes считается от планового времени, но допуск задачи — 15 минут."""
         self.call(now=NOW + timedelta(minutes=5))

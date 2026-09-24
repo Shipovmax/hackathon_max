@@ -27,7 +27,8 @@ function isEditable(task: DayTask, date: string): boolean {
 // Плановое время стоит слева, поэтому в подписи только то, что произошло.
 function subtitle(task: DayTask): string {
   if (task.done_by && task.done_at) {
-    const late = task.late_minutes ? `, с опозданием на ${task.late_minutes} мин` : '';
+    const late =
+      task.status === 'done_late' && task.late_minutes ? `, с опозданием на ${task.late_minutes} мин` : '';
     return `Отметил ${task.done_by} в ${task.done_at}${late}`;
   }
   if (task.claimed_by) return `Принимает ${task.claimed_by}`;

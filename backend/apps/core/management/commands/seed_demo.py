@@ -1,10 +1,18 @@
-"""Demo data for development and for the jury run. These are made-up stores and people, not real ones."""
+"""
+Demo data for development and for the jury run. These are made-up stores and people, not real ones.
+
+The data itself lives in backend/testdata/demo_network.json: that file is the test data handed over
+for checking, and this command only turns it into database rows.
+"""
 
 import datetime as dt
+import json
 import struct
 import zlib
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
@@ -28,43 +36,15 @@ from apps.core.models import (
     TaskTemplate,
 )
 
-NETWORK_NAME = "Демо-сеть"
-TZ = "Europe/Moscow"
+DATA_FILE = Path(settings.BASE_DIR) / "testdata" / "demo_network.json"
 
-STORES = [
-    ("Ленина, 14", "ул. Ленина, 14"),
-    ("Гагарина, 3", "ул. Гагарина, 3"),
-    ("ТЦ «Восход»", "пр. Мира, 1, ТЦ «Восход»"),
-]
 
-# weekday (0 = Monday) -> shift hours; Thursday evening at the first store is left uncovered on purpose,
-# so the coverage check has something to find.
-STAFF = {
-    "Ленина, 14": [
-        ("Анна К.", {0: (9, 17), 1: (9, 17), 3: (9, 17), 4: (9, 17), 5: (9, 17)}),
-        ("Игорь М.", {0: (14, 22), 1: (14, 22), 2: (14, 22), 4: (14, 22), 5: (14, 22), 6: (14, 22)}),
-        ("Даша П.", {2: (9, 17), 6: (9, 17)}),
-    ],
-    "Гагарина, 3": [
-        ("Олег В.", {0: (9, 16), 1: (9, 16), 2: (9, 16), 3: (9, 16), 4: (9, 16)}),
-        ("Марина Л.", {0: (16, 22), 1: (16, 22), 2: (16, 22), 3: (16, 22), 4: (16, 22), 5: (9, 22), 6: (9, 22)}),
-    ],
-    "ТЦ «Восход»": [
-        ("Света Р.", {0: (9, 16), 1: (9, 16), 2: (9, 16), 3: (9, 16), 4: (9, 16), 5: (9, 22), 6: (9, 22)}),
-        ("Кирилл Н.", {0: (16, 22), 1: (16, 22), 2: (16, 22), 3: (16, 22), 4: (16, 22)}),
-    ],
-}
+def load_demo_data(path: Path = DATA_FILE) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
 
-# Igor covers Thursday evening in the current (published) week only. Next week's draft therefore
-# has exactly one uncovered window, the one the coverage check is meant to find.
-CURRENT_WEEK_ONLY = {("Игорь М.", 3): (14, 22)}
 
-TEMPLATES = [
-    ("Открытие магазина", TaskKind.DAILY, dt.time(9, 0), 15, True, False, "Пришлите фото витрины и торгового зала"),
-    ("Подготовка зала", TaskKind.DAILY, dt.time(10, 0), 30, True, False, "Пришлите фото торгового зала"),
-    ("Приёмка поставки", TaskKind.ONE_TIME, dt.time(14, 0), 30, True, True, "Пришлите фото принятых коробок"),
-    ("Закрытие смены", TaskKind.DAILY, dt.time(22, 0), 20, True, False, "Пришлите отчёт о закрытии смены"),
-]
+def parse_hhmm(value: str) -> dt.time:
+    return dt.datetime.strptime(value, "%H:%M").time()
 
 
 def demo_photo_png(width: int = 360, height: int = 480) -> bytes:
@@ -103,7 +83,7 @@ def earlier(value: dt.time, minutes: int) -> dt.time:
 
 
 class Command(BaseCommand):
-    help = "Create demo network, stores, employees, schedule and today's tasks (test data)"
+    help = "Create demo network, stores, employees, schedule and today's tasks from testdata/demo_network.json"
 
     def add_arguments(self, parser):
         parser.add_argument("--owner-max-id", type=int, help="MAX user id of the owner")
@@ -111,23 +91,26 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
+        data = load_demo_data()
         owner = self.resolve_owner(options.get("owner_max_id"))
-        network, _ = Network.objects.get_or_create(owner=owner, defaults={"name": NETWORK_NAME})
-        if network.name != NETWORK_NAME:
-            network.name = NETWORK_NAME
+        network, _ = Network.objects.get_or_create(owner=owner, defaults={"name": data["network"]})
+        if network.name != data["network"]:
+            network.name = data["network"]
             network.save(update_fields=["name"])
 
         if options["reset"]:
             self.reset(network)
 
         today = timezone.localdate()
-        stores = {name: self.make_store(network, name, address) for name, address in STORES}
-        employees = self.make_employees(stores)
-        self.make_templates(stores, today)
-        shifts = self.make_shifts(stores, employees, today)
-        self.make_today_tasks(stores["Ленина, 14"], employees, today)
-        for name in ("Гагарина, 3", "ТЦ «Восход»"):
-            self.make_calm_day(stores[name], today)
+        stores = {item["name"]: self.make_store(network, item, data["timezone"]) for item in data["stores"]}
+        employees = self.make_employees(stores, data)
+        self.make_templates(stores, data["task_templates"], today)
+        shifts = self.make_shifts(stores, employees, data, today)
+        busy = data["today"]
+        self.make_today_tasks(stores[busy["store"]], employees[busy["performer"]], busy["tasks"], today)
+        for name, store in stores.items():
+            if name != busy["store"]:
+                self.make_calm_day(store, today)
 
         self.stdout.write(self.style.SUCCESS(f"Сеть «{network.name}» владельца {owner.max_user_id} готова"))
         self.stdout.write(f"Точек: {len(stores)}, сотрудников: {len(employees)}, смен: {shifts}")
@@ -166,91 +149,90 @@ class Command(BaseCommand):
         stores.delete()
         self.stdout.write("Прежние демо-данные удалены")
 
-    def make_store(self, network: Network, name: str, address: str) -> Store:
+    def make_store(self, network: Network, item: dict, zone: str) -> Store:
         store, _ = Store.objects.get_or_create(
             network=network,
-            name=name,
+            name=item["name"],
             defaults={
-                "address": address,
-                "open_time": dt.time(9, 0),
-                "close_time": dt.time(22, 0),
-                "timezone": TZ,
+                "address": item["address"],
+                "open_time": parse_hhmm(item["open_time"]),
+                "close_time": parse_hhmm(item["close_time"]),
+                "timezone": zone,
             },
         )
         return store
 
-    def make_employees(self, stores: dict[str, Store]) -> dict[str, Employee]:
+    def make_employees(self, stores: dict[str, Store], data: dict) -> dict[str, Employee]:
         result: dict[str, Employee] = {}
-        for store_name, people in STAFF.items():
-            for person_name, _ in people:
-                employee, created = Employee.objects.get_or_create(
-                    store=stores[store_name], name=person_name
-                )
-                result[person_name] = employee
-                if created:
-                    InviteCode.issue(employee)
-        dismissed, created = Employee.objects.get_or_create(
-            store=stores["Ленина, 14"], name="Пётр С.", defaults={"status": EmployeeStatus.DISMISSED}
-        )
-        if created:
-            self.stdout.write("Добавлен уволенный сотрудник Пётр С. (история сохраняется)")
+        for person in data["staff"]:
+            employee, created = Employee.objects.get_or_create(store=stores[person["store"]], name=person["name"])
+            result[person["name"]] = employee
+            if created:
+                InviteCode.issue(employee)
+        for person in data["dismissed"]:
+            _, created = Employee.objects.get_or_create(
+                store=stores[person["store"]], name=person["name"], defaults={"status": EmployeeStatus.DISMISSED}
+            )
+            if created:
+                self.stdout.write(f"Добавлен уволенный сотрудник {person['name']} (история сохраняется)")
         return result
 
-    def make_templates(self, stores: dict[str, Store], today: dt.date) -> None:
+    def make_templates(self, stores: dict[str, Store], templates: list[dict], today: dt.date) -> None:
         for store in stores.values():
-            for title, kind, planned, tolerance, photo, claim, prompt in TEMPLATES:
+            for item in templates:
+                planned = parse_hhmm(item["planned_time"])
+                one_time = item["kind"] == TaskKind.ONE_TIME
                 template, _ = TaskTemplate.objects.get_or_create(
                     store=store,
-                    title=title,
+                    title=item["title"],
                     defaults={
-                        "kind": kind,
+                        "kind": item["kind"],
                         "planned_time": planned,
                         "available_from": earlier(planned, DEMO_LEAD_MINUTES),
-                        "on_date": today if kind == TaskKind.ONE_TIME else None,
-                        "tolerance_minutes": tolerance,
-                        "requires_photo": photo,
-                        "requires_claim": claim,
-                        "photo_prompt": prompt,
+                        "on_date": today if one_time else None,
+                        "tolerance_minutes": item["tolerance_minutes"],
+                        "requires_photo": item["requires_photo"],
+                        "requires_claim": item["requires_claim"],
+                        "photo_prompt": item["photo_prompt"],
                     },
                 )
                 # The one-off delivery always happens "today", so the demo scenario is visible on any day.
-                if kind == TaskKind.ONE_TIME and template.on_date != today:
+                if one_time and template.on_date != today:
                     template.on_date = today
                     template.save(update_fields=["on_date"])
 
-    def make_shifts(self, stores: dict[str, Store], employees: dict[str, Employee], today: dt.date) -> int:
+    def make_shifts(self, stores: dict[str, Store], employees: dict[str, Employee], data: dict, today: dt.date) -> int:
         """Two whole weeks: the current one published so the bot can work, the next one a draft."""
         count = 0
         monday = today - dt.timedelta(days=today.weekday())
+        current_week_only = {(item["name"], item["weekday"]): (item["start"], item["end"]) for item in data["current_week_only"]}
         # The demo schedule is always restored to its intended shape, so re-running the command repairs it.
         Shift.objects.filter(
             store__in=stores.values(), date__gte=monday, date__lt=monday + dt.timedelta(days=14)
         ).delete()
-        for store_name, people in STAFF.items():
-            store = stores[store_name]
-            for person_name, pattern in people:
-                employee = employees[person_name]
-                for offset in range(14):
-                    date = monday + dt.timedelta(days=offset)
-                    current_week = offset < 7
-                    hours = pattern.get(date.weekday())
-                    if current_week:
-                        hours = hours or CURRENT_WEEK_ONLY.get((person_name, date.weekday()))
-                    if not hours:
-                        continue
-                    start, end = hours
-                    status = ShiftStatus.PUBLISHED if current_week else ShiftStatus.DRAFT
-                    _, created = Shift.objects.get_or_create(
-                        employee=employee,
-                        store=store,
-                        date=date,
-                        defaults={
-                            "start_time": dt.time(start, 0),
-                            "end_time": dt.time(end, 0),
-                            "status": status,
-                        },
-                    )
-                    count += int(created)
+        for person in data["staff"]:
+            employee = employees[person["name"]]
+            pattern = {int(day): hours for day, hours in person["shifts"].items()}
+            for offset in range(14):
+                date = monday + dt.timedelta(days=offset)
+                current_week = offset < 7
+                hours = pattern.get(date.weekday())
+                if current_week:
+                    hours = hours or current_week_only.get((person["name"], date.weekday()))
+                if not hours:
+                    continue
+                start, end = hours
+                _, created = Shift.objects.get_or_create(
+                    employee=employee,
+                    store=stores[person["store"]],
+                    date=date,
+                    defaults={
+                        "start_time": parse_hhmm(start),
+                        "end_time": parse_hhmm(end),
+                        "status": ShiftStatus.PUBLISHED if current_week else ShiftStatus.DRAFT,
+                    },
+                )
+                count += int(created)
         return count
 
     def make_calm_day(self, store: Store, today: dt.date) -> None:
@@ -270,17 +252,19 @@ class Command(BaseCommand):
             instance.status = TaskStatus.DONE_ON_TIME
             instance.save(update_fields=["status"])
 
-    def make_today_tasks(self, store: Store, employees: dict[str, Employee], today: dt.date) -> None:
+    def make_today_tasks(self, store: Store, performer: Employee, states: dict, today: dt.date) -> None:
         """Today at the first store looks like the mock-up: opening late, hall on time, delivery nobody took."""
         tz = ZoneInfo(store.timezone)
-        states = {
-            "Открытие магазина": (TaskStatus.DONE_LATE, dt.time(9, 40), 40),
-            "Подготовка зала": (TaskStatus.DONE_ON_TIME, dt.time(9, 55), 0),
-            "Приёмка поставки": (TaskStatus.UNCLAIMED, None, None),
-            "Закрытие смены": (TaskStatus.SCHEDULED, None, None),
-        }
+        now = timezone.now().astimezone(tz)
         for template in TaskTemplate.objects.filter(store=store):
-            status, done_at, late = states.get(template.title, (TaskStatus.SCHEDULED, None, None))
+            state = states.get(template.title, {"status": TaskStatus.SCHEDULED})
+            done_at = dt.datetime.combine(today, parse_hhmm(state["done_at"]), tzinfo=tz) if "done_at" in state else None
+            # Отметку «из будущего» не делаем: если команду запустили в 8 утра, открытие ещё впереди.
+            if done_at is not None and done_at > now:
+                done_at = None
+                status = TaskStatus.SCHEDULED
+            else:
+                status = state["status"]
             instance, _ = TaskInstance.objects.get_or_create(
                 template=template, date=today, defaults={"status": status}
             )
@@ -289,10 +273,7 @@ class Command(BaseCommand):
             completion = getattr(instance, "completion", None)
             if completion is None:
                 completion = Completion.objects.create(
-                    instance=instance,
-                    employee=employees["Анна К."],
-                    completed_at=dt.datetime.combine(today, done_at, tzinfo=tz),
-                    late_minutes=late,
+                    instance=instance, employee=performer, completed_at=done_at, late_minutes=state["late_minutes"]
                 )
             if not completion.photo:
                 completion.photo.save("demo.png", ContentFile(demo_photo_png()))

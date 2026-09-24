@@ -11,7 +11,7 @@ schemaVersion: "1.0"
 
 solution:
   name: "Контроль смен для сети магазинов (MAX)"
-  teamId: "t185"
+  teamId: "185"
 
 api:
   baseUrl: "https://task-controller.ru/api"

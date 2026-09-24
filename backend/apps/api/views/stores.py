@@ -14,6 +14,7 @@ from ..scoping import (
     get_store,
     owner_network,
     parse_time,
+    request_body,
 )
 
 
@@ -57,7 +58,7 @@ class StoreListView(APIView):
 
     def post(self, request):
         network = owner_network(request)
-        store = Store.objects.create(network=network, **clean_store(request.data))
+        store = Store.objects.create(network=network, **clean_store(request_body(request)))
         return Response(store_with_people(store), status=status.HTTP_201_CREATED)
 
 
@@ -80,7 +81,7 @@ class StoreDetailView(APIView):
             "close_time": store.close_time.strftime("%H:%M"),
             "closed_weekdays": store.closed_weekdays,
         }
-        values = clean_store({**current, **request.data})
+        values = clean_store({**current, **request_body(request)})
         for field, value in values.items():
             setattr(store, field, value)
         store.save(update_fields=list(values))
@@ -92,7 +93,7 @@ class StoreEmployeesView(APIView):
         store = get_store(request, store_id)
         with transaction.atomic():
             employee = Employee.objects.create(
-                store=store, name=clean_text(request.data.get("name"), "имя сотрудника", 150)
+                store=store, name=clean_text(request_body(request).get("name"), "имя сотрудника", 150)
             )
             InviteCode.issue(employee)
         return Response(person(employee), status=status.HTTP_201_CREATED)

@@ -15,6 +15,7 @@ from ..scoping import (
     get_template,
     parse_date,
     parse_time,
+    request_body,
 )
 
 DEFAULTS = {
@@ -93,7 +94,7 @@ class TaskTemplateListView(APIView):
 
     def post(self, request, store_id):
         store = get_store(request, store_id)
-        values = clean_template({**DEFAULTS, **request.data})
+        values = clean_template({**DEFAULTS, **request_body(request)})
         template = TaskTemplate.objects.create(store=store, **values)
         return Response(template_item(template), status=status.HTTP_201_CREATED)
 
@@ -101,7 +102,7 @@ class TaskTemplateListView(APIView):
 class TaskTemplateDetailView(APIView):
     def patch(self, request, template_id):
         template = get_template(request, template_id)
-        values = clean_template({**current_values(template), **request.data})
+        values = clean_template({**current_values(template), **request_body(request)})
         for field, value in values.items():
             setattr(template, field, value)
         template.save()

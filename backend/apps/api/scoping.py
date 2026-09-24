@@ -47,15 +47,31 @@ def get_template(request, template_id: int) -> TaskTemplate:
         raise not_found("Задача не найдена")
 
 
+def request_body(request) -> dict:
+    """Тело запроса — JSON-объект. Массив, число или null — ошибка ввода, а не 500."""
+    body = request.data
+    if not isinstance(body, dict):
+        raise bad_request("Тело запроса должно быть JSON-объектом")
+    return body
+
+
+# Дальше этих лет дат в работе магазина не бывает, а у края календаря ломается
+# арифметика недель (понедельник 0001-01-01, неделя после 9999-12-31).
+MIN_YEAR, MAX_YEAR = 2000, 2100
+
+
 def parse_date(value, *, required: bool = True) -> date | None:
     if value in (None, ""):
         if required:
             raise bad_request("Не указана дата")
         return None
     try:
-        return date.fromisoformat(str(value))
+        parsed = date.fromisoformat(str(value))
     except ValueError:
         raise bad_request("Дата указана неверно")
+    if not MIN_YEAR <= parsed.year <= MAX_YEAR:
+        raise bad_request("Дата указана неверно")
+    return parsed
 
 
 def parse_time(value) -> time:
@@ -70,7 +86,12 @@ def hhmm(value: time | datetime) -> str:
 
 
 def clean_text(value, label: str, max_length: int, *, required: bool = True) -> str:
-    text = str(value if value is not None else "").strip()
+    if value is not None and not isinstance(value, str):
+        raise bad_request(f"Поле «{label}» должно быть текстом")
+    # PostgreSQL не хранит нулевой символ в тексте и ответил бы ошибкой сервера.
+    if value and "\x00" in value:
+        raise bad_request(f"Поле «{label}» содержит недопустимый символ")
+    text = (value or "").strip()
     if required and not text:
         raise bad_request(f"Укажите {label}")
     if len(text) > max_length:

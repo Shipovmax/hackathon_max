@@ -6,12 +6,12 @@ from rest_framework.views import APIView
 from apps.core.models import EmployeeStatus, Shift, ShiftStatus
 
 from ..presenters import gaps_of, monday_of, schedule_payload, week_dates, week_status
-from ..scoping import bad_request, get_store, parse_date, parse_time
+from ..scoping import bad_request, get_store, parse_date, parse_time, request_body
 
 
 def parse_draft(request, store):
     """Validate {week_start, shifts} from the body: returns the week's Monday and parsed shift tuples."""
-    body = request.data
+    body = request_body(request)
     week_start = monday_of(parse_date(body.get("week_start")))
     items = body.get("shifts")
     if not isinstance(items, list):
@@ -23,7 +23,10 @@ def parse_draft(request, store):
     for item in items:
         if not isinstance(item, dict):
             raise bad_request("Смена указана неверно")
-        employee = people.get(item.get("employee_id"))
+        employee_id = item.get("employee_id")
+        if isinstance(employee_id, bool) or not isinstance(employee_id, int):
+            raise bad_request("Сотрудник не найден на этой точке")
+        employee = people.get(employee_id)
         if employee is None:
             raise bad_request("Сотрудник не найден на этой точке")
         # Смены уволенных график не правит: прошлые остаются историей, а приложение,

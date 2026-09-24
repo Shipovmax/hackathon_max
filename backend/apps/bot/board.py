@@ -6,9 +6,11 @@
 и не может нажать кнопку задачи, которой в его смене нет.
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import date as date_type, datetime, timedelta
 
+import httpx
 from django.conf import settings
 
 from apps.core.domain.lifecycle import (
@@ -29,12 +31,20 @@ from apps.core.models import (
 )
 
 from . import keyboards, texts
+from .max_api.client import MaxApiError
+
+log = logging.getLogger(__name__)
 
 DONE_STATUSES = (TaskStatus.DONE_ON_TIME, TaskStatus.DONE_LATE)
 
 
 def _hhmm(value) -> str:
     return value.strftime("%H:%M")
+
+
+def _shift_end(value) -> str:
+    """Смена до полуночи хранится как 23:59, а человеку привычнее «до 24:00»."""
+    return "24:00" if (value.hour, value.minute) == (23, 59) else _hhmm(value)
 
 
 def deadline_at(instance: TaskInstance) -> datetime:
@@ -174,7 +184,7 @@ def build(employee, shift: Shift, now: datetime, heading: str) -> tuple[str, lis
         heading,
         employee.store.name,
         _hhmm(shift.start_time),
-        _hhmm(shift.end_time),
+        _shift_end(shift.end_time),
         [_describe(row, now) for row in rows],
         sum(1 for row in rows if row.done),
         len(rows),
@@ -209,4 +219,8 @@ def broadcast(client, store: Store, day: date_type, now: datetime, heading: str,
     for shift in running_shifts(store, day, now):
         if shift.employee_id == skip_employee_id:
             continue
-        send(client, shift.employee, shift, now, heading)
+        try:
+            send(client, shift.employee, shift, now, heading)
+        except (MaxApiError, httpx.HTTPError) as error:
+            # Коллега закрыл диалог с ботом — остальные всё равно должны получить список.
+            log.warning("не удалось отправить доску смены %s: %s", shift.id, error)

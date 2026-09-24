@@ -1,5 +1,7 @@
+import logging
 from datetime import datetime, timedelta
 
+import httpx
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
@@ -24,7 +26,31 @@ from apps.core.models import (
 )
 
 from . import board, keyboards, notifications, texts
-from .max_api.client import MaxClient, message_id_of
+from .max_api.client import MaxApiError, MaxClient, message_id_of
+
+log = logging.getLogger(__name__)
+
+
+def _delivered(send, what: str) -> bool:
+    """
+    Отправить одно сообщение так, чтобы чужой сбой не остановил планировщик.
+
+    True — сообщение ушло или MAX отказал окончательно (пользователь заблокировал бота,
+    такого пользователя нет): повторять бессмысленно, шаг отмечаем выполненным.
+    False — сбой временный (429, 5xx, сеть): шаг не отмечаем, повторим на следующем такте.
+    """
+    try:
+        send()
+        return True
+    except MaxApiError as error:
+        if 400 <= error.status_code < 500 and error.status_code != 429:
+            log.warning("%s: MAX refused delivery, not retrying: %s", what, error)
+            return True
+        log.warning("%s: MAX is unavailable, will retry: %s", what, error)
+        return False
+    except httpx.HTTPError as error:
+        log.warning("%s: network error, will retry: %r", what, error)
+        return False
 
 
 def generate_task_instances(now: datetime) -> None:
@@ -54,7 +80,11 @@ def send_shift_start_messages(now: datetime, client=None) -> None:
         if sender is None:
             sender = MaxClient()
         # Доска смены: список задач и кнопка у каждой, отмечать можно прямо отсюда.
-        board.send(sender, shift.employee, shift, now, texts.BOARD_SHIFT_STARTED)
+        if not _delivered(
+            lambda: board.send(sender, shift.employee, shift, now, texts.BOARD_SHIFT_STARTED),
+            f"shift {shift.id} start board",
+        ):
+            continue
         shift.start_notified_at = now
         shift.save(update_fields=["start_notified_at"])
 
@@ -88,7 +118,10 @@ def refresh_changed_boards(now: datetime, client=None) -> None:
             continue
         if sender is None:
             sender = MaxClient()
-        board.send(sender, shift.employee, shift, now, texts.BOARD_UPDATED)
+        _delivered(
+            lambda: board.send(sender, shift.employee, shift, now, texts.BOARD_UPDATED),
+            f"shift {shift.id} updated board",
+        )
 
 
 def _claim_shifts(instance):
@@ -144,15 +177,20 @@ def send_claim_requests(now: datetime, client=None) -> None:
             if user_id in sent_to:
                 continue
             sent_to.add(user_id)
-            response = sender.send_message(
-                user_id=user_id,
-                text=texts.claim_question(
-                    instance.template.planned_time.strftime("%H:%M"),
-                    instance.template.title,
+            _delivered(
+                lambda: _remember_claim_prompt(
+                    instance,
+                    sender.send_message(
+                        user_id=user_id,
+                        text=texts.claim_question(
+                            instance.template.planned_time.strftime("%H:%M"),
+                            instance.template.title,
+                        ),
+                        buttons=keyboards.claim_button(instance.id),
+                    ),
                 ),
-                buttons=keyboards.claim_button(instance.id),
+                f"task {instance.id} claim question to {user_id}",
             )
-            _remember_claim_prompt(instance, response)
         instance.reminder_sent_at = now
         instance.status = TaskStatus.REMINDED
         instance.save(update_fields=["reminder_sent_at", "status", "claim_prompt_mids"])
@@ -238,10 +276,13 @@ def send_reminders(now: datetime, client=None) -> None:
                     minutes_left,
                     final,
                 )
-            sender.send_message(
-                user_id=user_id,
-                text=message,
-                buttons=keyboards.done_button(instance.id),
+            _delivered(
+                lambda: sender.send_message(
+                    user_id=user_id,
+                    text=message,
+                    buttons=keyboards.done_button(instance.id),
+                ),
+                f"task {instance.id} reminder to {user_id}",
             )
 
         # На втором напоминании каждой пары закрываем и первое: если бот лежал в его
@@ -326,7 +367,11 @@ def mark_overdue(now: datetime, client=None) -> None:
                 continue
             if sender is None:
                 sender = MaxClient()
-            notifications.notify_owner_overdue(instance, client=sender)
+            if not _delivered(
+                lambda: notifications.notify_owner_overdue(instance, client=sender),
+                f"task {instance.id} overdue notice",
+            ):
+                continue
             instance.status = TaskStatus.OVERDUE
             instance.overdue_notified_at = now
             instance.awaiting_photo_employee = None
@@ -370,7 +415,11 @@ def send_closing_notifications(now: datetime, client=None) -> None:
                 continue
             if sender is None:
                 sender = MaxClient()
-            notifications.notify_owner_closed_late(instance, client=sender)
+            if not _delivered(
+                lambda: notifications.notify_owner_closed_late(instance, client=sender),
+                f"task {instance.id} closing notice",
+            ):
+                continue
             instance.closing_notified_at = now
             instance.save(update_fields=["closing_notified_at"])
 
@@ -413,7 +462,11 @@ def escalate_unclaimed(now: datetime, client=None) -> None:
                     continue
                 if sender is None:
                     sender = MaxClient()
-                notifications.notify_owner_unclaimed(instance, client=sender)
+                if not _delivered(
+                    lambda: notifications.notify_owner_unclaimed(instance, client=sender),
+                    f"task {instance.id} unclaimed notice",
+                ):
+                    continue
                 instance.status = TaskStatus.UNCLAIMED
                 instance.overdue_notified_at = now
                 instance.save(update_fields=["status", "overdue_notified_at"])
@@ -436,16 +489,21 @@ def escalate_unclaimed(now: datetime, client=None) -> None:
                 if user_id in sent_to:
                     continue
                 sent_to.add(user_id)
-                response = sender.send_message(
-                    user_id=user_id,
-                    text=texts.claim_escalation(
-                        instance.template.title,
-                        instance.template.planned_time.strftime("%H:%M"),
-                        settings.CLAIM_ESCALATION_MINUTES_BEFORE,
+                _delivered(
+                    lambda: _remember_claim_prompt(
+                        instance,
+                        sender.send_message(
+                            user_id=user_id,
+                            text=texts.claim_escalation(
+                                instance.template.title,
+                                instance.template.planned_time.strftime("%H:%M"),
+                                settings.CLAIM_ESCALATION_MINUTES_BEFORE,
+                            ),
+                            buttons=keyboards.claim_button(instance.id),
+                        ),
                     ),
-                    buttons=keyboards.claim_button(instance.id),
+                    f"task {instance.id} claim escalation to {user_id}",
                 )
-                _remember_claim_prompt(instance, response)
             instance.escalation_sent_at = now
             instance.save(update_fields=["escalation_sent_at", "claim_prompt_mids"])
 
@@ -505,22 +563,37 @@ def send_shift_summaries(now: datetime, client=None) -> None:
             ]
             if sender is None:
                 sender = MaxClient()
-            sender.send_message(
-                user_id=shift.employee.account.max_user_id,
-                text=texts.shift_summary(len(done), len(relevant), not_marked),
-            )
+            if not _delivered(
+                lambda: sender.send_message(
+                    user_id=shift.employee.account.max_user_id,
+                    text=texts.shift_summary(len(done), len(relevant), not_marked),
+                ),
+                f"shift {shift.id} summary",
+            ):
+                continue
             shift.summary_sent_at = now
             shift.save(update_fields=["summary_sent_at"])
 
 
+STEPS = (
+    generate_task_instances,
+    send_shift_start_messages,
+    refresh_changed_boards,
+    send_claim_requests,
+    send_reminders,
+    expire_photo_waits,
+    mark_overdue,
+    send_closing_notifications,
+    escalate_unclaimed,
+    send_shift_summaries,
+)
+
+
 def tick(now: datetime) -> None:
-    generate_task_instances(now)
-    send_shift_start_messages(now)
-    refresh_changed_boards(now)
-    send_claim_requests(now)
-    send_reminders(now)
-    expire_photo_waits(now)
-    mark_overdue(now)
-    send_closing_notifications(now)
-    escalate_unclaimed(now)
-    send_shift_summaries(now)
+    # Шаги независимы: сбой одного (например, ошибка в данных одной точки) не должен
+    # лишать остальные точки напоминаний и уведомлений.
+    for step in STEPS:
+        try:
+            step(now)
+        except Exception:
+            log.exception("scheduler step %s failed", step.__name__)

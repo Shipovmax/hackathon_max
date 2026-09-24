@@ -138,3 +138,11 @@ class OnboardingTests(TestCase):
         on_role_chosen(FakeClient(), account, "cb-2", "admin")
         account.refresh_from_db()
         self.assertEqual(account.role, "")
+
+
+class ShiftEndTests(SimpleTestCase):
+    def test_midnight_shift_reads_as_24(self):
+        from apps.bot.board import _shift_end
+
+        self.assertEqual(_shift_end(time(23, 59)), "24:00")
+        self.assertEqual(_shift_end(time(22, 0)), "22:00")

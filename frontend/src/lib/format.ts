@@ -5,10 +5,12 @@ export const WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']
 
 export function formatRange(start: string, end: string): string {
   // В текущем API 23:59 — совместимый эквивалент конца дня. В интерфейсе человек
-  // видит привычную полночь, а серверу не приходится сравнивать два разных дня.
-  const visibleEnd = end === '23:59' ? '00:00' : end;
-  if (start.endsWith(':00') && visibleEnd.endsWith(':00')) return `${hour(start)}–${hour(visibleEnd)}`;
-  return `${start}–${visibleEnd}`;
+  // видит «10–24», а серверу не приходится сравнивать два разных дня.
+  const midnight = end === '23:59' || end === '00:00';
+  if (start.endsWith(':00') && (midnight || end.endsWith(':00'))) {
+    return `${hour(start)}–${midnight ? '24' : hour(end)}`;
+  }
+  return `${start}–${midnight ? '24:00' : end}`;
 }
 
 export function formatBusinessHours(start: string, end: string): string {
