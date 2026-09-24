@@ -1,20 +1,30 @@
 import { CellList, CellSimple, IconButton, Typography } from '@maxhub/max-ui';
-import { useNavigate } from 'react-router-dom';
+import { useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useApi } from '../api/hooks';
 import type { Dashboard as DashboardData } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
+import { DateNav } from '../components/DateNav';
 import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import { healthTone, HealthBadge, Progress, StatusDot } from '../components/StatusBadge';
-import { formatDate, plural } from '../lib/format';
+import { addDays, formatDate, plural, today } from '../lib/format';
 import { useTheme } from '../max/theme';
 
 export function Dashboard() {
   const navigate = useNavigate();
   const theme = useTheme();
-  const state = useApi<DashboardData>('/dashboard/');
+  const [params, setParams] = useSearchParams();
+  const date = params.get('date') ?? today();
+  const setDate = useCallback(
+    (next: string) => setParams(next === today() ? {} : { date: next }, { replace: true }),
+    [setParams],
+  );
+  const state = useApi<DashboardData>(`/dashboard/?date=${date}`);
+  const yesterday = addDays(today(), -1);
+  const previous = useApi<DashboardData>(`/dashboard/?date=${yesterday}`);
 
   return (
     <AsyncView state={state}>
@@ -25,11 +35,15 @@ export function Dashboard() {
         const tone = urgent.length ? 'bad' : late.length ? 'warn' : 'ok';
         const done = data.stores.reduce((sum, store) => sum + store.done, 0);
         const total = data.stores.reduce((sum, store) => sum + store.total, 0);
+        const previousProblems =
+          date === today()
+            ? (previous.data?.stores.filter((store) => store.health === 'overdue' || store.health === 'unclaimed') ?? [])
+            : [];
 
         return (
           <Screen
             title="Мои точки"
-            subtitle={`Сегодня, ${formatDate(data.date)}`}
+            subtitle={date === today() ? `Сегодня, ${formatDate(data.date)}` : formatDate(data.date)}
             action={
               <span className="screen__actions">
                 <IconButton
@@ -52,6 +66,22 @@ export function Dashboard() {
               </span>
             }
           >
+            <div className="screen__block">
+              <DateNav date={date} onChange={setDate} calendar />
+            </div>
+
+            {previousProblems.length > 0 && (
+              <CellList mode="island">
+                <CellSimple
+                  title="За вчера остались невыполненные задачи"
+                  subtitle={previousProblems.map((store) => store.name).join(', ')}
+                  after={<span className="badge badge--bad">{previousProblems.length}</span>}
+                  showChevron
+                  onClick={() => setDate(yesterday)}
+                />
+              </CellList>
+            )}
+
             {data.stores.length > 0 && (
               <div className="screen__block">
                 <div className={`summary summary--${tone}`}>
@@ -65,7 +95,7 @@ export function Dashboard() {
                   <Typography.Body variant="small">
                     {total > 0
                       ? `Выполнено ${done} из ${total} ${plural(total, ['задачи', 'задач', 'задач'])} за день`
-                      : 'Задач на сегодня нет'}
+                      : date === today() ? 'Задач на сегодня нет' : 'Задач за этот день нет'}
                   </Typography.Body>
                   <Progress done={done} total={total} tone={tone === 'ok' ? 'ok' : 'warn'} />
                 </div>
@@ -101,7 +131,7 @@ export function Dashboard() {
                     }
                     after={<HealthBadge health={store.health} />}
                     showChevron
-                    onClick={() => navigate(`/stores/${store.id}`)}
+                    onClick={() => navigate(`/stores/${store.id}${date === today() ? '' : `?date=${date}`}`)}
                   />
                 ))}
               </CellList>

@@ -17,6 +17,7 @@ import { findGaps } from '../lib/coverage';
 import {
   addDays,
   formatDayLabel,
+  formatBusinessHours,
   formatRange,
   formatWeekRange,
   isValidTime,
@@ -28,7 +29,7 @@ import {
 
 /** Сегодняшний столбец подсвечен, выходные точки приглушены — неделя читается сразу. */
 function cellClass(date: string, closed: boolean): string {
-  return [date === today() && 'schedule__col--today', closed && 'schedule__col--closed']
+  return [date === today() && 'schedule__col--today', date < today() && 'schedule__col--past', closed && 'schedule__col--closed']
     .filter(Boolean)
     .join(' ');
 }
@@ -97,14 +98,14 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
         date: addDays(data.week_start, index),
         // Выходной — тот, что задал владелец точки, а не просто суббота с воскресеньем.
         closed: data.closed_weekdays.includes(index),
+        past: addDays(data.week_start, index) < today(),
       })),
     [data.week_start, data.closed_weekdays],
   );
 
   // Пересчитываем окна сразу после правки — в том числе в уже опубликованной неделе.
-  const gaps = useMemo(
-    () =>
-      dirty
+  const gaps = useMemo(() => {
+    const all = dirty
         ? findGaps(
             days.map((day) => day.date),
             shifts,
@@ -112,7 +113,11 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
             data.close_time,
             days.filter((day) => day.closed).map((day) => day.date),
           )
-        : (serverGaps ?? []),
+        : (serverGaps ?? []);
+    // График планирует оставшуюся часть недели. Пустые понедельник и вторник в
+    // среду уже являются историей и не должны выглядеть новой проблемой.
+    return all.filter((gap) => gap.date >= today());
+  },
     [dirty, days, shifts, data.open_time, data.close_time, serverGaps],
   );
 
@@ -125,7 +130,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
       employeeName,
       date,
       start: shift?.start ?? data.open_time,
-      end: shift?.end ?? data.close_time,
+      end: (shift?.end ?? data.close_time) === '23:59' ? '00:00' : (shift?.end ?? data.close_time),
       existing: Boolean(shift),
     });
   };
@@ -152,7 +157,8 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
     if (!result) return;
     setServerGaps(result.gaps);
     setDirty(false);
-    toast.show(result.gaps.length === 0 ? 'Окон нет, неделя закрыта' : `Найдено окон: ${result.gaps.length}`, result.gaps.length === 0 ? 'ok' : 'bad');
+    const relevant = result.gaps.filter((gap) => gap.date >= today());
+    toast.show(relevant.length === 0 ? 'Окон на оставшиеся дни нет' : `Найдено окон: ${relevant.length}`, relevant.length === 0 ? 'ok' : 'bad');
   };
 
   const runSave = async (publish: boolean) => {
@@ -196,8 +202,8 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
         </div>
 
         <Typography.Label variant="small">
-          Рабочий день {formatRange(data.open_time, data.close_time)}. Нажмите на ячейку, чтобы задать смену. Пустая
-          ячейка — выходной сотрудника. Приглушённые дни — выходные точки, их покрывать не нужно.
+          Рабочий день {formatBusinessHours(data.open_time, data.close_time)}. Нажмите на ячейку, чтобы задать смену.
+          Пустая ячейка — выходной сотрудника. Прошедшие дни и выходные точки не требуют покрытия.
         </Typography.Label>
 
         {data.employees.length === 0 ? (
@@ -234,6 +240,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
                           <button
                             type="button"
                             className={`schedule__cell${shift ? ' schedule__cell--filled' : ''}`}
+                            disabled={day.past}
                             onClick={() => openEditor(employee.id, employee.name, day.date)}
                           >
                             {shift ? formatRange(shift.start, shift.end) : '—'}
@@ -263,7 +270,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
           </div>
         ) : (
           <div className="alert alert--ok">
-            <Typography.Body variant="medium">Рабочий день закрыт целиком, окон нет</Typography.Body>
+            <Typography.Body variant="medium">На оставшиеся рабочие дни окон нет</Typography.Body>
           </div>
         )}
 
@@ -317,7 +324,7 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
 }
 
 interface CoverageStripProps {
-  days: { label: string; date: string; closed: boolean }[];
+  days: { label: string; date: string; closed: boolean; past: boolean }[];
   gaps: Gap[];
   openTime: string;
   closeTime: string;
@@ -337,7 +344,7 @@ function CoverageStrip({ days, gaps, openTime, closeTime }: CoverageStripProps) 
       {days.map((day) => (
         <div className="coverage__day" key={day.date}>
           <span className="coverage__label">{day.label}</span>
-          <span className={day.closed ? 'coverage__bar coverage__bar--closed' : 'coverage__bar'}>
+          <span className={day.closed || day.past ? 'coverage__bar coverage__bar--closed' : 'coverage__bar'}>
             {gaps
               .filter((gap) => gap.date === day.date)
               .map((gap) => (
@@ -383,11 +390,12 @@ function ShiftEditor({ state, onClose, onApply, onClear }: ShiftEditorProps) {
       setProblem('Время в формате ЧЧ:ММ, например 09:00');
       return;
     }
-    if (minutesOf(start) >= minutesOf(end)) {
+    const normalizedEnd = end === '00:00' ? '23:59' : end;
+    if (minutesOf(start) >= minutesOf(normalizedEnd)) {
       setProblem('Конец смены должен быть позже начала');
       return;
     }
-    onApply({ ...state, start, end });
+    onApply({ ...state, start, end: normalizedEnd });
   };
 
   return (
