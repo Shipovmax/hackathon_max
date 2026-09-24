@@ -1,4 +1,4 @@
-import { Button, CellHeader, CellList, CellSimple, Typography } from '@maxhub/max-ui';
+import { Button, CellHeader, CellList, CellSimple } from '@maxhub/max-ui';
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -52,7 +52,6 @@ export function StoreTasks() {
       {() => (
         <Screen
           title="Задачи точки"
-          subtitle="Из них бот составляет список дня"
           back
           backTo={`/stores/${storeId}`}
         >
@@ -102,9 +101,6 @@ export function StoreTasks() {
             <Button variant="secondary" stretched onClick={() => setEditing(blank('one_time'))}>
               Добавить разовую задачу на дату
             </Button>
-            <Typography.Label variant="small">
-              Разовая задача нужна, когда поставщик назвал дату приёмки.
-            </Typography.Label>
           </div>
 
           <TaskEditor

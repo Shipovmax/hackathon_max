@@ -93,10 +93,10 @@ export function Dashboard() {
                         ? `Запланировано ${total} ${plural(total, ['задача', 'задачи', 'задач'])}`
                         : 'Задач на этот день нет'
                       : urgent.length
-                      ? `${urgent.length} ${plural(urgent.length, ['точка требует', 'точки требуют', 'точек требуют'])} внимания`
-                      : late.length
-                        ? `Всё выполнено, но ${late.length} ${plural(late.length, ['точка', 'точки', 'точек'])} с опозданием`
-                        : 'Все точки без замечаний'}
+                        ? `${urgent.length} ${plural(urgent.length, ['точка требует', 'точки требуют', 'точек требуют'])} внимания`
+                        : late.length
+                          ? `Всё выполнено, но ${late.length} ${plural(late.length, ['точка', 'точки', 'точек'])} с опозданием`
+                          : 'Все точки без замечаний'}
                   </Typography.Title>
                   <Typography.Body variant="small">
                     {future
@@ -152,12 +152,6 @@ export function Dashboard() {
             <CellList mode="island">
               <CellSimple title="Точки и сотрудники" showChevron onClick={() => navigate('/people')} />
             </CellList>
-
-            <div className="screen__block">
-              <Typography.Label variant="small" className="muted">
-                В штатном режиме приложение молчит. Уведомление приходит только тогда, когда нужно вмешаться.
-              </Typography.Label>
-            </div>
           </Screen>
         );
       }}

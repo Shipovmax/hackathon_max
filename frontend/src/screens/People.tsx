@@ -13,7 +13,7 @@ import { TimeField } from '../components/TimeField';
 import { Screen } from '../components/Screen';
 import { Sheet } from '../components/Sheet';
 import { useToast } from '../components/Toast';
-import { formatBusinessHours, isValidTime, minutesOf, plural, WEEKDAYS } from '../lib/format';
+import { formatBusinessHours, isValidTime, minutesOf, WEEKDAYS } from '../lib/format';
 
 const STATUS: Record<Person['status'], string> = {
   connected: 'в боте',
@@ -31,14 +31,9 @@ export function People() {
   return (
     <AsyncView state={state}>
       {(stores) => {
-        const employeeCount = stores.reduce(
-          (sum, store) => sum + store.employees.filter((person) => person.status !== 'dismissed').length,
-          0,
-        );
         return (
         <Screen
           title="Точки и сотрудники"
-          subtitle={`${stores.length} ${plural(stores.length, ['точка', 'точки', 'точек'])} · ${employeeCount} ${plural(employeeCount, ['сотрудник', 'сотрудника', 'сотрудников'])}`}
           back
           backTo="/"
         >
@@ -227,7 +222,6 @@ function StoreForm({
             label="Закрытие"
             value={form.close_time}
             onChange={(close_time) => setForm({ ...form, close_time })}
-            hint="00:00 означает закрытие в полночь"
           />
         </>
       )}
@@ -246,9 +240,6 @@ function StoreForm({
             </button>
           ))}
         </div>
-        <Typography.Label variant="small" className="field__hint">
-          В выходной задачи не ставятся, а пустой день в графике не считается окном
-        </Typography.Label>
       </div>
       {problem && <div className="alert alert--bad">{problem}</div>}
       <ErrorNote error={save.error} />
