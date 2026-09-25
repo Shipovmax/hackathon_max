@@ -3,7 +3,7 @@ import { useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useApi } from '../api/hooks';
-import type { Dashboard as DashboardData } from '../api/types';
+import type { Dashboard as DashboardData, StoreHealth } from '../api/types';
 import { AsyncView } from '../components/AsyncView';
 import { DateNav } from '../components/DateNav';
 import { Empty } from '../components/Empty';
@@ -12,6 +12,9 @@ import { Screen } from '../components/Screen';
 import { healthTone, HealthBadge, Progress, StatusDot } from '../components/StatusBadge';
 import { addDays, formatDate, plural, today } from '../lib/format';
 import { useTheme } from '../max/theme';
+
+// Точки с проблемами поднимаются наверх: красные впереди жёлтых, зелёные — в конце.
+const HEALTH_RANK: Record<StoreHealth, number> = { overdue: 0, unclaimed: 0, late: 1, ok: 2 };
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -33,6 +36,7 @@ export function Dashboard() {
         const urgent = data.stores.filter((store) => store.health === 'overdue' || store.health === 'unclaimed');
         const late = data.stores.filter((store) => store.health === 'late');
         const tone = urgent.length ? 'bad' : late.length ? 'warn' : 'ok';
+        const sortedStores = [...data.stores].sort((a, b) => HEALTH_RANK[a.health] - HEALTH_RANK[b.health]);
         const done = data.stores.reduce((sum, store) => sum + store.done, 0);
         const total = data.stores.reduce((sum, store) => sum + store.total, 0);
         // Будущий день — это план: отмечать ещё нечего, поэтому ни «без замечаний», ни «0 из N».
@@ -123,7 +127,7 @@ export function Dashboard() {
 
             {data.stores.length > 0 && (
               <CellList mode="island">
-                {data.stores.map((store) => (
+                {sortedStores.map((store) => (
                   <CellSimple
                     key={store.id}
                     before={<StatusDot tone={future ? 'idle' : healthTone(store.health)} />}
