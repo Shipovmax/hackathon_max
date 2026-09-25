@@ -1,11 +1,3 @@
-"""
-Доска смены: список задач сотрудника с кнопкой у каждой незакрытой задачи.
-
-Одна и та же доска уходит в начале смены, после каждой отметки и на «что осталось».
-Поэтому сотрудник всегда видит актуальный список, а не цепочку разрозненных сообщений,
-и не может нажать кнопку задачи, которой в его смене нет.
-"""
-
 import logging
 from dataclasses import dataclass
 from datetime import date as date_type, datetime, timedelta
@@ -43,30 +35,20 @@ def _hhmm(value) -> str:
 
 
 def _shift_end(value) -> str:
-    """Смена до полуночи хранится как 23:59, а человеку привычнее «до 24:00»."""
     return "24:00" if (value.hour, value.minute) == (23, 59) else _hhmm(value)
 
 
 def deadline_at(instance: TaskInstance) -> datetime:
-    """Момент, после которого задача считается просроченной."""
     return planned_at(instance) + timedelta(minutes=instance.template.tolerance_minutes)
 
 
 def is_open_yet(instance: TaskInstance, now: datetime) -> bool:
-    """Подошло ли окно задачи: раньше него отмечать нечего."""
     zone = store_zone(instance.template.store)
     opens_at = datetime.combine(instance.date, instance.template.available_from, tzinfo=zone)
     return now >= opens_at
 
 
 def is_running(shift: Shift, now: datetime) -> bool:
-    """
-    Может ли смена сейчас работать со своими задачами.
-
-    Начинается с допуском на границе, а заканчивается не раньше срока последней своей
-    задачи: иначе закрытие в 22:00 пропадало бы из списка в 22:05, хотя его ещё можно
-    подтвердить.
-    """
     zone = store_zone(shift.store)
     tolerance = timedelta(minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES)
     starts_at = datetime.combine(shift.date, shift.start_time, tzinfo=zone)
@@ -74,7 +56,6 @@ def is_running(shift: Shift, now: datetime) -> bool:
 
 
 def current_shift(employee, now: datetime) -> Shift | None:
-    """Опубликованная смена сотрудника, идущая прямо сейчас."""
     shifts = (
         Shift.objects.filter(
             employee=employee,
@@ -89,7 +70,6 @@ def current_shift(employee, now: datetime) -> Shift | None:
 
 
 def running_shifts(store: Store, day: date_type, now: datetime) -> list[Shift]:
-    """Все, кто сейчас на смене в этой точке и подключён к боту."""
     shifts = (
         Shift.objects.filter(
             store=store,
@@ -115,12 +95,6 @@ class Row:
 
 
 def rows_for(employee, shift: Shift, now: datetime) -> list[Row]:
-    """
-    Задачи смены: те, чьё плановое время попадает в её границы.
-
-    Чужую задачу «Беру» не показываем — за неё отвечает тот, кто её взял, и упрекать
-    за неё постороннего нельзя (CLAUDE.md §6).
-    """
     rows = []
     for instance in ensure_instances(employee.store, shift.date):
         if not shift.start_time <= instance.template.planned_time <= shift.end_time:
@@ -133,7 +107,6 @@ def rows_for(employee, shift: Shift, now: datetime) -> list[Row]:
 
 
 def _describe(row: Row, now: datetime) -> tuple[str, str, str, str]:
-    """Строка списка: значок, время, название, пояснение о текущем состоянии."""
     instance, template = row.instance, row.instance.template
     at = _hhmm(template.planned_time)
     deadline = _hhmm(deadline_at(instance))
@@ -164,7 +137,6 @@ def _describe(row: Row, now: datetime) -> tuple[str, str, str, str]:
 
 
 def _button_rows(rows: list[Row], now: datetime) -> list[tuple[int, str, str, bool]]:
-    """Кнопки ставим только у задач, с которыми сотрудник может что-то сделать сейчас."""
     out = []
     for row in rows:
         if row.done or row.status == TaskStatus.MISSED:
@@ -178,7 +150,6 @@ def _button_rows(rows: list[Row], now: datetime) -> list[tuple[int, str, str, bo
 
 
 def build(employee, shift: Shift, now: datetime, heading: str) -> tuple[str, list[list[dict]]]:
-    """Текст доски и клавиатура к ней."""
     rows = rows_for(employee, shift, now)
     text = texts.shift_board(
         heading,
@@ -193,12 +164,6 @@ def build(employee, shift: Shift, now: datetime, heading: str) -> tuple[str, lis
 
 
 def mark_shown(shift: Shift, now: datetime) -> None:
-    """
-    Запоминаем момент показа списка.
-
-    По нему планировщик понимает, что владелец правил задачи точки уже после того,
-    как сотрудник видел список, и что список пора прислать заново.
-    """
     shift.board_sent_at = now
     shift.save(update_fields=["board_sent_at"])
 
@@ -210,17 +175,10 @@ def send(client, employee, shift: Shift, now: datetime, heading: str) -> None:
 
 
 def broadcast(client, store: Store, day: date_type, now: datetime, heading: str, skip_employee_id: int) -> None:
-    """
-    Обновлённый список остальным, кто сейчас на смене.
-
-    Тому, кто нажал кнопку, доска приходит ответом на нажатие и заменяет прежнее сообщение,
-    поэтому его здесь пропускаем.
-    """
     for shift in running_shifts(store, day, now):
         if shift.employee_id == skip_employee_id:
             continue
         try:
             send(client, shift.employee, shift, now, heading)
         except (MaxApiError, httpx.HTTPError) as error:
-            # Коллега закрыл диалог с ботом — остальные всё равно должны получить список.
             log.warning("не удалось отправить доску смены %s: %s", shift.id, error)

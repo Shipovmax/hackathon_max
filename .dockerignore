@@ -10,6 +10,3 @@ frontend/dist
 backend/db.sqlite3
 backend/media
 backend/staticfiles
-docs
-task.pdf
-Claude

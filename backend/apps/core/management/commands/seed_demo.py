@@ -1,10 +1,3 @@
-"""
-Demo data for development and for the jury run. These are made-up stores and people, not real ones.
-
-The data itself lives in backend/testdata/demo_network.json: that file is the test data handed over
-for checking, and this command only turns it into database rows.
-"""
-
 import datetime as dt
 import json
 import struct
@@ -48,8 +41,6 @@ def parse_hhmm(value: str) -> dt.time:
 
 
 def demo_photo_png(width: int = 360, height: int = 480) -> bytes:
-    """A plain placeholder picture, drawn without any imaging library: sky, wall and a shop-window band."""
-
     def chunk(kind: bytes, data: bytes) -> bytes:
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
@@ -72,12 +63,10 @@ def demo_photo_png(width: int = 360, height: int = 480) -> bytes:
     )
 
 
-# Демо-задачи можно отмечать за полчаса до планового времени, не раньше.
 DEMO_LEAD_MINUTES = 30
 
 
 def earlier(value: dt.time, minutes: int) -> dt.time:
-    """Время минус минуты, без перехода через полночь."""
     shifted = value.hour * 60 + value.minute - minutes
     return dt.time.min if shifted <= 0 else dt.time(shifted // 60, shifted % 60)
 
@@ -196,17 +185,14 @@ class Command(BaseCommand):
                         "photo_prompt": item["photo_prompt"],
                     },
                 )
-                # The one-off delivery always happens "today", so the demo scenario is visible on any day.
                 if one_time and template.on_date != today:
                     template.on_date = today
                     template.save(update_fields=["on_date"])
 
     def make_shifts(self, stores: dict[str, Store], employees: dict[str, Employee], data: dict, today: dt.date) -> int:
-        """Two whole weeks: the current one published so the bot can work, the next one a draft."""
         count = 0
         monday = today - dt.timedelta(days=today.weekday())
         current_week_only = {(item["name"], item["weekday"]): (item["start"], item["end"]) for item in data["current_week_only"]}
-        # The demo schedule is always restored to its intended shape, so re-running the command repairs it.
         Shift.objects.filter(
             store__in=stores.values(), date__gte=monday, date__lt=monday + dt.timedelta(days=14)
         ).delete()
@@ -236,7 +222,6 @@ class Command(BaseCommand):
         return count
 
     def make_calm_day(self, store: Store, today: dt.date) -> None:
-        """A store without remarks: every task that is already due was done on time."""
         tz = ZoneInfo(store.timezone)
         now = timezone.now().astimezone(tz)
         performer = Employee.objects.filter(store=store, status=EmployeeStatus.ACTIVE).order_by("name").first()
@@ -253,13 +238,11 @@ class Command(BaseCommand):
             instance.save(update_fields=["status"])
 
     def make_today_tasks(self, store: Store, performer: Employee, states: dict, today: dt.date) -> None:
-        """Today at the first store looks like the mock-up: opening late, hall on time, delivery nobody took."""
         tz = ZoneInfo(store.timezone)
         now = timezone.now().astimezone(tz)
         for template in TaskTemplate.objects.filter(store=store):
             state = states.get(template.title, {"status": TaskStatus.SCHEDULED})
             done_at = dt.datetime.combine(today, parse_hhmm(state["done_at"]), tzinfo=tz) if "done_at" in state else None
-            # Отметку «из будущего» не делаем: если команду запустили в 8 утра, открытие ещё впереди.
             if done_at is not None and done_at > now:
                 done_at = None
                 status = TaskStatus.SCHEDULED

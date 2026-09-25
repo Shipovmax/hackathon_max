@@ -8,7 +8,6 @@ export class ApiError extends Error {
   }
 }
 
-/** Текст для пользователя: короткий, с причиной и без кода ошибки. */
 export function describeError(error: Error): string {
   if (!(error instanceof ApiError)) return 'Нет связи с сервером. Проверьте интернет и повторите.';
   if (error.status === 401) return 'Откройте приложение из чата с ботом в MAX.';

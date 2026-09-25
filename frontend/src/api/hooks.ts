@@ -7,7 +7,6 @@ export interface ApiState<T> {
   error: Error | null;
   loading: boolean;
   reload: () => void;
-  /** Локальное обновление после успешной записи, чтобы не перезапрашивать экран. */
   setData: (data: T) => void;
 }
 
@@ -43,12 +42,10 @@ export function useApi<T>(path: string): ApiState<T> {
 export interface ActionState {
   running: boolean;
   error: Error | null;
-  /** Возвращает undefined, если запрос не прошёл: ошибка уже в state.error. */
   run: <T>(task: () => Promise<T>) => Promise<T | undefined>;
   reset: () => void;
 }
 
-/** Запись на сервер: состояние «сохраняю» для кнопки и текст ошибки рядом с формой. */
 export function useAction(): ActionState {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<Error | null>(null);

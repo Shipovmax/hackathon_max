@@ -7,7 +7,6 @@ interface ErrorNoteProps {
   onRetry?: () => void;
 }
 
-/** Ошибка действия рядом с формой: экран остаётся на месте, можно повторить. */
 export function ErrorNote({ error, onRetry }: ErrorNoteProps) {
   if (!error) return null;
   return (

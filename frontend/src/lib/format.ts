@@ -4,8 +4,6 @@ const pad = (n: number) => String(n).padStart(2, '0');
 export const WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 
 export function formatRange(start: string, end: string): string {
-  // В текущем API 23:59 — совместимый эквивалент конца дня. В интерфейсе человек
-  // видит «10–24», а серверу не приходится сравнивать два разных дня.
   const midnight = end === '23:59' || end === '00:00';
   if (start.endsWith(':00') && (midnight || end.endsWith(':00'))) {
     return `${hour(start)}–${midnight ? '24' : hour(end)}`;
@@ -27,7 +25,6 @@ export function formatShortDate(iso: string): string {
   return new Date(`${iso}T00:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 }
 
-/** «пн, 22 сент» — как подписан день в графике и в списке окон. */
 export function formatDayLabel(iso: string): string {
   return `${WEEKDAYS[weekdayIndex(iso)]}, ${formatShortDate(iso)}`;
 }
@@ -46,12 +43,10 @@ export function addDays(iso: string, days: number): string {
   return toIso(date);
 }
 
-/** 0 — понедельник, 6 — воскресенье. */
 export function weekdayIndex(iso: string): number {
   return (new Date(`${iso}T00:00:00`).getDay() + 6) % 7;
 }
 
-/** Понедельник недели, в которую попадает дата. */
 export function weekStart(iso: string): string {
   return addDays(iso, -weekdayIndex(iso));
 }
@@ -67,17 +62,14 @@ export function minutesOf(time: string): number {
   return h * 60 + m;
 }
 
-/** Насколько раньше планового времени задачу можно отметить, если владелец не выбрал своё. */
 export const DEFAULT_LEAD_MINUTES = 30;
 
-/** «22:00» минус 30 → «21:30». Через полночь не переходим, упираемся в 00:00. */
 export function earlierBy(time: string, minutes: number): string {
   const left = minutesOf(time) - minutes;
   if (!Number.isFinite(left) || left <= 0) return '00:00';
   return `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
 }
 
-/** «22–28 сент» — подпись недели в графике. */
 export function formatWeekRange(week: string): string {
   const end = addDays(week, 6);
   const short = (iso: string, withMonth: boolean) =>
@@ -86,7 +78,6 @@ export function formatWeekRange(week: string): string {
   return `${short(week, !sameMonth)}–${short(end, true)}`;
 }
 
-/** «1 точка», «2 точки», «5 точек». */
 export function plural(count: number, forms: [string, string, string]): string {
   const n = Math.abs(count) % 100;
   const n1 = n % 10;

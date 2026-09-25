@@ -10,12 +10,10 @@ from apps.bot.scheduler import mark_overdue
 from apps.core.models import MaxAccount, Network, Store, TaskInstance, TaskStatus, TaskTemplate
 
 DAY = date(2026, 9, 21)
-AFTER_DEADLINE = datetime(2026, 9, 21, 6, 16, tzinfo=timezone.utc)  # 09:16 по Москве
+AFTER_DEADLINE = datetime(2026, 9, 21, 6, 16, tzinfo=timezone.utc)
 
 
 class FlakyClient:
-    """Отказывает одному получателю, остальным доставляет."""
-
     def __init__(self, failing_user: int, error: Exception):
         self.failing_user = failing_user
         self.error = error
@@ -29,8 +27,6 @@ class FlakyClient:
 
 
 class DeliveryFailureTests(TestCase):
-    """Сбой доставки одному человеку не должен останавливать планировщик для всех остальных."""
-
     def setUp(self):
         self.blocked = self.open_task(owner_id=1, store_name="Lenina, 14")
         self.healthy = self.open_task(owner_id=2, store_name="Gagarina, 3")
@@ -53,7 +49,6 @@ class DeliveryFailureTests(TestCase):
 
         self.blocked.refresh_from_db()
         self.healthy.refresh_from_db()
-        # Пользователь закрыл диалог с ботом: повторять бессмысленно, итог дня всё равно просрочка.
         self.assertEqual(self.blocked.status, TaskStatus.OVERDUE)
         self.assertIsNotNone(self.blocked.overdue_notified_at)
         self.assertEqual(self.healthy.status, TaskStatus.OVERDUE)

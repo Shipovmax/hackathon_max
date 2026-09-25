@@ -1,10 +1,6 @@
-// Проверка покрытия: сливаем интервалы смен и сравниваем с рабочим днём точки.
-// Тот же расчёт делает бэкенд; здесь он нужен для режима демо-данных и для мгновенной
-// проверки черновика до отправки.
 import type { Gap, ShiftInput } from '../api/types';
 import { minutesOf } from './format';
 
-/** Допуск на границах: смена до 21:55 при закрытии в 22:00 — это покрытие, а не окно. */
 export const EDGE_TOLERANCE_MINUTES = 5;
 
 interface Interval {
@@ -48,10 +44,6 @@ function gapsOfDay(date: string, shifts: ShiftInput[], open: number, close: numb
   return gaps;
 }
 
-/**
- * Окна за неделю: дни идут по порядку, внутри дня — по времени. Выходные точки
- * пропускаем: пустой день, когда магазин закрыт, — не окно.
- */
 export function findGaps(
   dates: string[],
   shifts: ShiftInput[],

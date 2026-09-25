@@ -11,10 +11,6 @@ import { Sheet } from './Sheet';
 import { TimeField } from './TimeField';
 import { useToast } from './Toast';
 
-/**
- * Форма задачи точки. Живёт отдельно от экрана «Задачи точки», потому что ту же задачу
- * правят из карточки точки, прямо из списка дня.
- */
 interface TaskEditorProps {
   storeId: number;
   task: TaskTemplateItem | TaskTemplateInput | null;
@@ -91,7 +87,6 @@ export function TaskEditor({ storeId, task, onClose, onDone }: TaskEditorProps) 
         onChange={(planned_time) =>
           patch({
             planned_time,
-            // Окно едет за плановым временем, пока владелец не задал своё.
             available_from: form.available_from === earlierBy(form.planned_time, DEFAULT_LEAD_MINUTES)
               ? earlierBy(planned_time, DEFAULT_LEAD_MINUTES)
               : form.available_from,

@@ -15,7 +15,6 @@ interface PhotoViewProps {
 
 const isDirect = (url: string) => url.startsWith('data:') || url.startsWith('http');
 
-/** Фото отметки во весь экран. Скачивание не нужно: владелец просто смотрит. */
 export function PhotoView({ url, title, onClose }: PhotoViewProps) {
   const close = useCallback(() => onClose(), [onClose]);
   const panel = useRef<HTMLDivElement>(null);

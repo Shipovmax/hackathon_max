@@ -7,7 +7,6 @@ export type ColorScheme = 'light' | 'dark';
 
 const KEY = 'theme-mode';
 
-/** Хранилище может быть недоступно (приватный режим, запрет на данные сайта). */
 function readMode(): ThemeMode {
   try {
     const stored = localStorage.getItem(KEY);
@@ -22,14 +21,12 @@ function writeMode(mode: ThemeMode): void {
     if (mode === 'auto') localStorage.removeItem(KEY);
     else localStorage.setItem(KEY, mode);
   } catch {
-    // Настройка не сохранится — тема всё равно применится на эту сессию.
   }
 }
 
 const systemScheme = (): ColorScheme =>
   window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 
-// Тему читают и переключают разные экраны, поэтому состояние одно на приложение.
 let mode: ThemeMode = readMode();
 let system: ColorScheme = systemScheme();
 const listeners = new Set<() => void>();
@@ -54,10 +51,6 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/**
- * По умолчанию приложение живёт в теме MAX, но владелец может закрепить свою.
- * Выбранная тема попадает в data-theme на <html>, оттуда её забирает CSS.
- */
 export function useTheme() {
   const scheme = useSyncExternalStore(subscribe, () => snapshot);
 

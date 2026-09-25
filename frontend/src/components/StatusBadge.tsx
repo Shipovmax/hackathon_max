@@ -39,12 +39,10 @@ export function HealthBadge({ health }: { health: StoreHealth }) {
   return <Badge label={label} tone={tone} />;
 }
 
-/** Точка статуса слева от строки: цвет видно раньше, чем прочитан текст. */
 export function StatusDot({ tone }: { tone: Tone }) {
   return <span className={`dot dot--${tone}`} aria-hidden="true" />;
 }
 
-/** Полоса «сколько задач закрыто» — счётчик читается за один взгляд. */
 export function Progress({ done, total, tone }: { done: number; total: number; tone: Tone }) {
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
   return (

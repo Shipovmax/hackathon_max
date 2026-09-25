@@ -12,7 +12,6 @@ interface SheetProps {
   children: ReactNode;
 }
 
-/** Форма поверх экрана: в MAX UI 0.5.0 своего модального окна нет. */
 export function Sheet({ title, open, onClose, children }: SheetProps) {
   const close = useCallback(() => onClose(), [onClose]);
   const dialog = useRef<HTMLDivElement>(null);
@@ -48,8 +47,6 @@ export function Sheet({ title, open, onClose, children }: SheetProps) {
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     const frame = requestAnimationFrame(() => {
-      // Не открываем экранную клавиатуру сразу: на телефоне это перекрывает
-      // половину формы. Фокус остаётся внутри диалога и доступен с клавиатуры.
       dialog.current?.focus();
     });
     return () => {

@@ -9,7 +9,6 @@ interface AsyncViewProps<T> {
   children: (data: T) => ReactNode;
 }
 
-/** Загрузка, ошибка с причиной и повтор — на каждом экране одинаково. */
 export function AsyncView<T>({ state, children }: AsyncViewProps<T>) {
   if (state.loading && state.data === null) {
     return (

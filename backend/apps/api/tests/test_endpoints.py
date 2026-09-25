@@ -7,7 +7,7 @@ from urllib.parse import quote
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from apps.core.models import MaxAccount, Role
+from apps.core.models import MaxAccount, Network, Role
 
 TOKEN = "test-bot-token"
 
@@ -54,6 +54,13 @@ class ApiEndpointTests(TestCase):
         response = self.client.get("/api/me/", HTTP_X_MAX_INIT_DATA=signed_init_data(222))
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["code"], "not_owner")
+
+    def test_owner_who_switched_to_employee_role_keeps_the_app(self):
+        owner = MaxAccount.objects.create(max_user_id=555, role=Role.EMPLOYEE)
+        Network.objects.create(owner=owner, name="Mine")
+        response = self.client.get("/api/me/", HTTP_X_MAX_INIT_DATA=signed_init_data(555))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["network"]["name"], "Mine")
 
     def test_unknown_account_is_created_without_role_and_forbidden(self):
         response = self.client.get("/api/me/", HTTP_X_MAX_INIT_DATA=signed_init_data(333))

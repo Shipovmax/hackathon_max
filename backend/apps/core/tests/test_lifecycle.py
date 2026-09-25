@@ -102,8 +102,6 @@ class LifecycleTests(TestCase):
 
 
 class StoreDaysOffTests(TestCase):
-    """В выходной точка закрыта: ежедневных задач нет, ложных просрочек тоже."""
-
     def setUp(self):
         self.store = make_store(make_network())
         self.store.closed_weekdays = [DAY.weekday()]
@@ -119,7 +117,6 @@ class StoreDaysOffTests(TestCase):
         self.assertEqual([i.template.title for i in ensure_instances(self.store, tomorrow)], ["Opening"])
 
     def test_one_time_task_on_a_day_off_stays(self):
-        """Разовую задачу владелец поставил на эту дату сам — значит, она нужна."""
         make_template(self.store, "Inventory", at=(11, 0), one_time_on=DAY)
         self.assertEqual([i.template.title for i in ensure_instances(self.store, DAY)], ["Inventory"])
 
@@ -130,13 +127,6 @@ class StoreDaysOffTests(TestCase):
 
 
 class FrozenHistoryTests(TestCase):
-    """
-    Правка задачи — план на будущее, а не переписывание прошлого.
-
-    Раньше статус пересчитывался по текущему допуску: подняли допуск с 15 до 240 минут —
-    и вчерашнее опоздание стало «вовремя».
-    """
-
     def setUp(self):
         self.store = make_store(make_network())
         self.employee = Employee.objects.create(store=self.store, name="Anna")
@@ -177,7 +167,6 @@ class FrozenHistoryTests(TestCase):
         self.assertEqual(self.status(10, day=DAY + dt.timedelta(days=1)), TaskStatus.MISSED)
 
     def test_completing_a_reported_task_is_late_even_within_a_raised_tolerance(self):
-        """Владельцу уже сообщили о просрочке — поднятый потом допуск её не отменяет."""
         self.instance.overdue_notified_at = moscow(9, 16)
         self.instance.save(update_fields=["overdue_notified_at"])
         self.edit(tolerance_minutes=240)
@@ -185,7 +174,6 @@ class FrozenHistoryTests(TestCase):
         self.assertEqual(self.status(12), TaskStatus.DONE_LATE)
 
     def test_pending_task_still_follows_the_edited_plan(self):
-        """Не наступивший итог правке подчиняется: владелец дал смене больше времени."""
         self.edit(tolerance_minutes=60)
         self.assertEqual(self.status(9, 30), TaskStatus.SCHEDULED)
 

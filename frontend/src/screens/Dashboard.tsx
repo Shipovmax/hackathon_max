@@ -13,7 +13,6 @@ import { healthTone, HealthBadge, Progress, StatusDot } from '../components/Stat
 import { addDays, formatDate, plural, today } from '../lib/format';
 import { useTheme } from '../max/theme';
 
-// Точки с проблемами поднимаются наверх: красные впереди жёлтых, зелёные — в конце.
 const HEALTH_RANK: Record<StoreHealth, number> = { overdue: 0, unclaimed: 0, late: 1, ok: 2 };
 
 export function Dashboard() {
@@ -32,14 +31,12 @@ export function Dashboard() {
   return (
     <AsyncView state={state}>
       {(data) => {
-        // Красные — задача не сделана, туда надо вмешаться. Жёлтые — сделали, но поздно.
         const urgent = data.stores.filter((store) => store.health === 'overdue' || store.health === 'unclaimed');
         const late = data.stores.filter((store) => store.health === 'late');
         const tone = urgent.length ? 'bad' : late.length ? 'warn' : 'ok';
         const sortedStores = [...data.stores].sort((a, b) => HEALTH_RANK[a.health] - HEALTH_RANK[b.health]);
         const done = data.stores.reduce((sum, store) => sum + store.done, 0);
         const total = data.stores.reduce((sum, store) => sum + store.total, 0);
-        // Будущий день — это план: отмечать ещё нечего, поэтому ни «без замечаний», ни «0 из N».
         const future = date > today();
         const previousProblems =
           date === today()

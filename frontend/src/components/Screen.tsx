@@ -17,8 +17,6 @@ interface ScreenProps {
 export function Screen({ title, subtitle, back, backTo = '/', action, children }: ScreenProps) {
   const navigate = useNavigate();
   const goBack = useCallback(() => {
-    // При обычном переходе возвращаем туда, откуда пришли. При прямом входе по
-    // диплинку истории нет — тогда ведём на предсказуемый родительский экран.
     const historyIndex = window.history.state?.idx;
     if (typeof historyIndex === 'number' && historyIndex > 0) navigate(-1);
     else navigate(backTo, { replace: true });

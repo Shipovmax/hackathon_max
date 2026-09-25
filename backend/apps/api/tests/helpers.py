@@ -30,8 +30,6 @@ def signed_init_data(user_id: int) -> str:
 
 @override_settings(BOT_TOKEN=TOKEN)
 class OwnerApiTestCase(TestCase):
-    """An owner with one store and two employees; requests are signed like MAX signs a mini-app launch."""
-
     def setUp(self):
         self.network: Network = make_network(OWNER_ID)
         self.store = make_store(self.network)
@@ -45,11 +43,9 @@ class OwnerApiTestCase(TestCase):
         )
 
     def other_owner(self):
-        """Another owner with their own store, to check that networks stay separated."""
         network = make_network(2002, "Other network")
         return make_store(network, "Foreign store")
 
     @staticmethod
     def at(hour: int, minute: int = 0, day=None):
-        """Freeze the server clock at a Moscow wall-clock time."""
         return mock.patch("django.utils.timezone.now", return_value=moscow(hour, minute, day))

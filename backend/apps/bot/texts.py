@@ -1,6 +1,3 @@
-"""User-facing bot messages. Tone: short, no exclamation marks, a refusal always says who does it instead (CLAUDE.md §14)."""
-
-
 def plural_ru(n: int, forms: tuple[str, str, str]) -> str:
     n = abs(n) % 100
     if 11 <= n <= 14:
@@ -18,7 +15,6 @@ def minutes(n: int) -> str:
 
 
 def tasks_word(n: int) -> str:
-    """Форма после «из N»: родительный падеж — «из 1 задачи», «из 3 задач»."""
     return plural_ru(n, ("задачи", "задач", "задач"))
 
 
@@ -40,7 +36,6 @@ CLAIM_NOT_AVAILABLE = (
 )
 NOT_IMPLEMENTED = "Эта часть бота ещё в разработке."
 
-# Заголовки доски смены: что произошло прямо перед списком.
 BOARD_SHIFT_STARTED = "Смена началась"
 BOARD_STATUS = "Задачи смены"
 BOARD_UPDATED = "Список задач изменился"
@@ -60,12 +55,6 @@ def shift_board(
     done: int,
     total: int,
 ) -> str:
-    """
-    Доска смены: что случилось, где и до скольки работаем, счётчик и список задач.
-
-    `rows` — готовые строки `(значок, время, название, пояснение)`: доска ничего не решает
-    сама, вид задачи считается там, где есть модели.
-    """
     head = [heading, f"{store_name} · смена {shift_start}–{shift_end}"]
     if total == 0:
         head.append("Задач на эту смену нет")
@@ -78,7 +67,6 @@ def shift_board(
 
 
 def board_row_open(deadline: str, needs_photo: bool) -> str:
-    """Пояснение у невыполненной задачи: до какого времени её примут и нужно ли фото."""
     return f"отметить до {deadline}" + (", нужно фото" if needs_photo else "")
 
 
@@ -104,7 +92,6 @@ BOARD_ROW_MISSED = "не выполнено за смену"
 
 
 def board_row_not_yet(available_from: str) -> str:
-    """Задача ещё впереди: кнопки у неё нет, чтобы её нельзя было закрыть заранее."""
     return f"отметить можно с {available_from}"
 
 
@@ -124,7 +111,6 @@ def photo_accepted_heading(task_title: str, at: str, late_minutes: int) -> str:
 
 
 def done_by_other_heading(task_title: str, employee_name: str, at: str) -> str:
-    """Остальным на смене: кто и что закрыл, чтобы никто не делал работу дважды."""
     return f"«{task_title}» отмечено: {employee_name}, {at}"
 
 
@@ -139,7 +125,6 @@ def ask_photo_for(
     wait_minutes: int,
     prompt: str = "",
 ) -> str:
-    """Просьба о фото всегда называет задачу: у сотрудника их несколько и кнопки похожи."""
     what = prompt or "Пришлите фото, которое подтверждает выполнение."
     return (
         f"Задача «{task_title}», плановое время {planned}.\n\n"

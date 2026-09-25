@@ -20,7 +20,6 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    // Обрыв связи: фетч не дошёл до сервера, статуса нет.
     throw new ApiError(0, 'network', 'нет связи с сервером');
   }
 
@@ -38,10 +37,6 @@ export const apiPut = <T>(path: string, body: unknown) => request<T>('PUT', path
 export const apiPatch = <T>(path: string, body: unknown) => request<T>('PATCH', path, body);
 export const apiDelete = <T>(path: string) => request<T>('DELETE', path);
 
-/**
- * Фото отметки отдаёт наш бэкенд и проверяет подпись запуска, а тег <img>
- * заголовки не шлёт. Поэтому скачиваем сами и показываем из памяти.
- */
 export async function apiBlobUrl(path: string): Promise<string> {
   if (USE_MOCKS) return mockRequest<string>('GET', path);
 

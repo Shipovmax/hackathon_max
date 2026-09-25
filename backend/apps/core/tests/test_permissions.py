@@ -89,13 +89,6 @@ class CheckCanMarkTests(TestCase):
 
 
 class TaskWindowTests(TestCase):
-    """
-    У задачи есть время, раньше которого её не отметить.
-
-    Без него закрытие смены, запланированное на 22:00, закрывалось бы в час дня —
-    смена-то идёт.
-    """
-
     def setUp(self):
         network = make_network()
         self.store = make_store(network)
@@ -125,23 +118,14 @@ class TaskWindowTests(TestCase):
         self.assertTrue(self.check(13).allowed)
 
     def test_finished_shift_still_wins_over_the_window(self):
-        """Порядок отказов важен: сначала смена, потом окно задачи."""
         self.assertEqual(self.check(23, 30).denial, MarkDenial.ENDED)
 
 
 class ShiftEndTests(TestCase):
-    """
-    Закрытие в 22:00 при смене до 22:00.
-
-    Магазин закрыли ровно в десять, а подтверждают на пару минут позже — фото закрытой
-    двери делают, когда она закрыта. Смена для своей задачи открыта до её срока.
-    """
-
     def setUp(self):
         network = make_network()
         self.store = make_store(network)
         make_template(self.store, "Closing", at=(22, 0), tolerance=20, available_from=(21, 30))
-        # Задача следующей смены: её вечерний сотрудник закрывать не должен.
         make_template(self.store, "Night check", at=(22, 10), tolerance=30)
         instances = {i.template.title: i for i in ensure_instances(self.store, DAY)}
         self.closing = instances["Closing"]

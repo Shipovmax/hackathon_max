@@ -98,12 +98,10 @@ def _denial_text(employee: Employee, instance: TaskInstance, decision, now) -> s
 
 
 def _late(instance: TaskInstance, completion) -> int:
-    """Опоздание показываем, только если оно вышло за допуск задачи."""
     return completion.late_minutes if instance.status == TaskStatus.DONE_LATE else 0
 
 
 def _photo_request(instance: TaskInstance) -> str:
-    """Просьба о фото называет задачу и срок: кнопок в смене несколько, они похожи."""
     return texts.ask_photo_for(
         instance.template.title,
         _time(instance.template.planned_time),
@@ -114,10 +112,6 @@ def _photo_request(instance: TaskInstance) -> str:
 
 
 def _answer_with_board(client, callback_id: str, employee: Employee, now, heading: str) -> None:
-    """
-    Ответ на нажатие заменяет сообщение с кнопкой, поэтому кладём туда всю доску:
-    сотрудник сразу видит обновлённый список, а не состояние до нажатия.
-    """
     shift = board.current_shift(employee, now)
     if shift is None:
         client.answer_callback(callback_id, text=heading)
@@ -128,7 +122,6 @@ def _answer_with_board(client, callback_id: str, employee: Employee, now, headin
 
 
 def _tell_the_rest(client, employee: Employee, instance: TaskInstance, now, heading: str) -> None:
-    """Остальным на смене — обновлённый список, чтобы никто не делал работу дважды."""
     board.broadcast(
         client,
         instance.template.store,
@@ -140,12 +133,6 @@ def _tell_the_rest(client, employee: Employee, instance: TaskInstance, now, head
 
 
 def _close_claim_prompts(client, instance: TaskInstance, employee: Employee) -> None:
-    """
-    Убирает кнопку «Беру» из уже отправленных вопросов: задачу забрали.
-
-    Вызывается до ответа на нажатие. Ответ заменяет сообщение с кнопкой, и если бы правка
-    шла после, она затёрла бы только что показанный список задач.
-    """
     if not instance.claim_prompt_mids:
         return
     text = texts.claim_taken_by(
@@ -155,7 +142,6 @@ def _close_claim_prompts(client, instance: TaskInstance, employee: Employee) -> 
         try:
             client.edit_message(message_id, text=text)
         except (MaxApiError, httpx.HTTPError) as error:
-            # Сообщение могли удалить вручную. Это не повод ронять взятие задачи.
             log.warning("не удалось убрать кнопку «Беру» из %s: %s", message_id, error)
     instance.claim_prompt_mids = []
     instance.save(update_fields=["claim_prompt_mids"])
@@ -163,9 +149,7 @@ def _close_claim_prompts(client, instance: TaskInstance, employee: Employee) -> 
 
 @dataclass
 class _Outcome:
-    """Чем закончилось нажатие «Выполнено»: отказ, просьба о фото или готовая отметка."""
-
-    kind: str  # refused | photo | done
+    kind: str
     text: str = ""
     instance: TaskInstance | None = None
     done_at: str = ""
@@ -211,7 +195,6 @@ def _mark_or_refuse(employee: Employee, instance_id: int, now) -> _Outcome:
             return _Outcome("photo", _photo_request(instance), instance=instance)
 
         if template.requires_photo:
-            # Одно ожидание фото на сотрудника: иначе непонятно, к какой задаче снимок.
             pending = (
                 TaskInstance.objects.filter(
                     status=TaskStatus.AWAITING_PHOTO,
@@ -242,7 +225,6 @@ def _mark_or_refuse(employee: Employee, instance_id: int, now) -> _Outcome:
 
 
 def on_done(client, account, callback_id: str, instance_id: int) -> None:
-    """Кнопка «Выполнено»: проверяет смену и либо просит фото, либо закрывает задачу."""
     employee = _employee(account)
     if employee is None:
         client.answer_callback(callback_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
@@ -252,7 +234,6 @@ def on_done(client, account, callback_id: str, instance_id: int) -> None:
     result = _mark_or_refuse(employee, instance_id, now)
 
     if result.kind == "photo":
-        # Ждём одно конкретное действие, поэтому список с кнопками сейчас только мешает.
         client.answer_callback(callback_id, text=result.text)
         return
     if result.kind == "refused":
@@ -277,7 +258,6 @@ def on_done(client, account, callback_id: str, instance_id: int) -> None:
 
 
 def on_photo(client, account, message: dict) -> None:
-    """Фото для задачи, которую сотрудник взял на отметку; вложение несёт ссылку на CDN."""
     employee = _employee(account)
     if employee is None:
         client.send_message(user_id=account.max_user_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
@@ -358,7 +338,6 @@ def on_photo(client, account, message: dict) -> None:
 
 
 def on_claim(client, account, callback_id: str, instance_id: int) -> None:
-    """Кнопка «Беру»: первое нажатие побеждает, остальным на смене говорим, кто взял."""
     employee = _employee(account)
     if employee is None:
         client.answer_callback(callback_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
@@ -430,7 +409,6 @@ def on_claim(client, account, callback_id: str, instance_id: int) -> None:
 
 
 def on_status(client, account) -> None:
-    """«Что осталось»: доска текущей смены или заглушка про состояние смены."""
     employee = _employee(account)
     if employee is None:
         client.send_message(user_id=account.max_user_id, text=texts.ROLE_EMPLOYEE_ASK_CODE)
@@ -452,7 +430,6 @@ def on_status(client, account) -> None:
         .order_by("start_time")
     )
 
-    # Та же граница, что у отметки: смена открыта, пока не вышел срок её последней задачи.
     current = next((shift for shift in shifts if board.is_running(shift, now)), None)
     if current is None:
         upcoming = [

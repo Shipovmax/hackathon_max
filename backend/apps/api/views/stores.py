@@ -19,7 +19,6 @@ from ..scoping import (
 
 
 def clean_closed_weekdays(value) -> list[int]:
-    """Дни недели, когда точка закрыта: 0 — понедельник, 6 — воскресенье."""
     if value is None:
         return []
     if not isinstance(value, list) or any(
@@ -33,7 +32,6 @@ def clean_closed_weekdays(value) -> list[int]:
 
 
 def clean_store(values: dict) -> dict:
-    """Поля точки целиком: и для создания, и для правки поверх текущих значений."""
     open_time, close_time = parse_time(values.get("open_time")), parse_time(values.get("close_time"))
     if close_time <= open_time:
         raise bad_request("Магазин должен закрываться позже, чем открывается")
@@ -67,12 +65,6 @@ class StoreDetailView(APIView):
         return Response(store_with_people(get_store(request, store_id)))
 
     def patch(self, request, store_id):
-        """
-        Правка точки после создания: название, адрес, часы работы, выходные.
-
-        Приходят только изменённые поля, поэтому проверяем их вместе с текущими:
-        новое закрытие должно быть позже старого открытия, и наоборот.
-        """
         store = get_store(request, store_id)
         current = {
             "name": store.name,
@@ -114,13 +106,6 @@ class EmployeeInviteView(APIView):
 
 class EmployeeDeleteView(APIView):
     def delete(self, request, employee_id):
-        """
-        Убрать уволенного сотрудника из списка.
-
-        Если он ни разу не работал — запись удаляем целиком. Если за ним есть смены или
-        отметки, запись остаётся: на неё ссылается история задач, и «Отметил Пётр С.»
-        не должно превратиться в пустое место. Из списка сотрудников он пропадает.
-        """
         employee = get_employee(request, employee_id)
         if employee.status == EmployeeStatus.ACTIVE:
             return Response(
@@ -149,8 +134,5 @@ class EmployeeDismissView(APIView):
             employee.status = EmployeeStatus.DISMISSED
             employee.save(update_fields=["status"])
             employee.invites.filter(used_at__isnull=True).delete()
-            # Будущие смены уволенного отменяются: он не придёт, и график должен показать
-            # владельцу окно, а не ложное покрытие. Сегодняшняя и прошлые остаются историей.
             employee.shifts.filter(date__gt=store_today(employee.store)).delete()
-        # History stays: completions keep pointing at the employee, only the status changes.
         return Response(person(employee))

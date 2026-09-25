@@ -9,8 +9,6 @@ from .helpers import make_network, make_shift, make_store, moscow
 
 
 class ShiftNotificationFieldsTests(TestCase):
-    """Планировщик помечает в смене разовые сообщения: старт смены и итог смены."""
-
     def setUp(self):
         store = make_store(make_network())
         self.employee = Employee.objects.create(store=store, name="Igor")
@@ -31,7 +29,6 @@ class ShiftNotificationFieldsTests(TestCase):
         self.assertEqual(stored.summary_sent_at, moscow(17, 0))
 
     def test_unsent_shifts_are_filterable(self):
-        """Так планировщик находит смены, которым сообщение ещё не уходило."""
         sent = make_shift(self.employee)
         sent.start_notified_at = moscow(9, 0)
         sent.save(update_fields=["start_notified_at"])
@@ -43,6 +40,5 @@ class ShiftNotificationFieldsTests(TestCase):
 
 class MigrationsTests(TestCase):
     def test_no_missing_migrations(self):
-        """Модели и миграции совпадают — иначе на сервере поднимется не та схема."""
         out = StringIO()
         call_command("makemigrations", "--check", "--dry-run", stdout=out, stderr=out)

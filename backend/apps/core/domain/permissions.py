@@ -29,14 +29,6 @@ class MarkDecision:
 
 
 def shift_open_until(shift) -> datetime:
-    """
-    До какого момента смена может отмечать свои задачи.
-
-    Обычно это конец смены плюс допуск на границе. Но если задача стоит на самый конец
-    смены — закрытие магазина в 22:00 при смене до 22:00, — подтверждают её уже после:
-    фото закрытой двери делают, когда дверь закрыта. Поэтому смена остаётся открытой
-    до срока последней своей задачи.
-    """
     zone = store_zone(shift.store)
     until = datetime.combine(shift.date, shift.end_time, tzinfo=zone) + timedelta(
         minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES
@@ -51,10 +43,6 @@ def shift_open_until(shift) -> datetime:
 
 
 def check_can_mark(employee, instance, now: datetime) -> MarkDecision:
-    """Allowed only while the employee's published shift at this store is running (± boundary tolerance).
-
-    A denial carries what the message needs: the employee's shift hours, or who already did the task.
-    """
     completion = getattr(instance, "completion", None)
     if completion is not None:
         zone = store_zone(instance.template.store)
@@ -83,7 +71,6 @@ def check_can_mark(employee, instance, now: datetime) -> MarkDecision:
     zone = store_zone(store)
     tolerance = timedelta(minutes=settings.SHIFT_BOUNDARY_TOLERANCE_MINUTES)
 
-    # Окно задачи: раньше него отметки нет смысла принимать, даже если смена идёт.
     available_from = instance.template.available_from
     if now < datetime.combine(instance.date, available_from, tzinfo=zone):
         return MarkDecision(False, MarkDenial.TOO_EARLY, available_from=available_from)
@@ -98,8 +85,6 @@ def check_can_mark(employee, instance, now: datetime) -> MarkDecision:
         if start <= now <= end:
             return MarkDecision(True, shift_start=shift.start_time, shift_end=shift.end_time)
 
-    # Задачу своей смены можно подтвердить и после её конца, пока не вышел срок задачи.
-    # Только свою: чужую задачу вечерней смены утренний сотрудник так не отметит.
     deadline = planned_at(instance) + timedelta(minutes=instance.template.tolerance_minutes)
     planned_time = instance.template.planned_time
     for shift in shifts:

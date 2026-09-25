@@ -3,7 +3,6 @@ from django.test import SimpleTestCase
 from apps.api.auth import InitDataError, validate_init_data
 
 TOKEN = "test-bot-token"
-# Computed independently with Node's crypto module following dev.max.ru/docs/webapps/validation.
 VECTOR = (
     "auth_date=1700000000"
     "&chat=%7B%22id%22%3A12345%2C%22type%22%3A%22DIALOG%22%7D"

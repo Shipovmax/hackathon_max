@@ -22,11 +22,6 @@ class DayTaskRow:
 
 
 def day_tasks(store: Store, day: date, now: datetime) -> list[DayTaskRow]:
-    """Tasks of one store for one day, in chronological order.
-
-    Today the rows are created on demand, future days are shown from the templates without saving,
-    past days show only what was actually recorded.
-    """
     today = store_today(store, now)
 
     if day == today:

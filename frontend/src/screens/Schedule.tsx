@@ -27,7 +27,6 @@ import {
   weekStart,
 } from '../lib/format';
 
-/** Сегодняшний столбец подсвечен, выходные точки приглушены — неделя читается сразу. */
 function cellClass(date: string, closed: boolean): string {
   return [date === today() && 'schedule__col--today', date < today() && 'schedule__col--past', closed && 'schedule__col--closed']
     .filter(Boolean)
@@ -45,8 +44,6 @@ interface EditorState {
 
 export function Schedule() {
   const { storeId } = useParams();
-  // Открываем текущую неделю: чаще смотрят на то, что идёт сейчас, а следующая
-  // в одном нажатии стрелкой вперёд.
   const [week, setWeek] = useState(() => weekStart(today()));
   const state = useApi<ScheduleData>(`/stores/${storeId}/schedule/?week=${week}`);
 
@@ -96,14 +93,12 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
       WEEKDAYS.map((label, index) => ({
         label,
         date: addDays(data.week_start, index),
-        // Выходной — тот, что задал владелец точки, а не просто суббота с воскресеньем.
         closed: data.closed_weekdays.includes(index),
         past: addDays(data.week_start, index) < today(),
       })),
     [data.week_start, data.closed_weekdays],
   );
 
-  // Пересчитываем окна сразу после правки — в том числе в уже опубликованной неделе.
   const gaps = useMemo(() => {
     const all = dirty
         ? findGaps(
@@ -114,8 +109,6 @@ function ScheduleWeek({ storeId, data, week, loading, onWeek, onSaved }: Schedul
             days.filter((day) => day.closed).map((day) => day.date),
           )
         : (serverGaps ?? []);
-    // График планирует оставшуюся часть недели. Пустые понедельник и вторник в
-    // среду уже являются историей и не должны выглядеть новой проблемой.
     return all.filter((gap) => gap.date >= today());
   },
     [dirty, days, shifts, data.open_time, data.close_time, serverGaps],
@@ -330,11 +323,6 @@ interface CoverageStripProps {
   closeTime: string;
 }
 
-/**
- * Полоса покрытия: каждый день рабочего дня показан целиком, красные куски —
- * это часы, на которые никто не поставлен. Список окон словами остаётся ниже,
- * но дыру в неделе видно раньше, чем её читают.
- */
 function CoverageStrip({ days, gaps, openTime, closeTime }: CoverageStripProps) {
   const open = minutesOf(openTime);
   const span = minutesOf(closeTime) - open;

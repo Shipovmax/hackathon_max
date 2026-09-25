@@ -25,7 +25,7 @@ from apps.core.models import (
 
 
 DAY = date(2026, 9, 21)
-NOW = datetime(2026, 9, 21, 7, 3, tzinfo=timezone.utc)  # 10:03 in Moscow
+NOW = datetime(2026, 9, 21, 7, 3, tzinfo=timezone.utc)
 
 
 class RecordingClient:
@@ -106,7 +106,6 @@ class DoneCallbackTests(TestCase):
         return self.client.answers[-1][1]
 
     def answer_heading(self):
-        """Первая строка ответа — что именно произошло; ниже идёт доска смены."""
         return self.answer_text().splitlines()[0]
 
     def answer_payloads(self):
@@ -140,11 +139,9 @@ class DoneCallbackTests(TestCase):
         self.assertIn("Выполнено 1 из 2 задач", self.answer_text())
         self.assertIn("✓ 10:00 Open store — Anna в 10:03, вовремя", self.answer_text())
         self.assertIn("○ 11:00 Prepare sales floor — отметить до 11:15", self.answer_text())
-        # Кнопка остаётся только у незакрытой задачи.
         self.assertEqual(self.answer_payloads(), [f"done:{next_instance.id}"])
 
     def test_others_on_shift_receive_the_updated_board(self):
-        """Один отметил — у всех на смене список обновляется, чтобы не делать дважды."""
         igor_account = MaxAccount.objects.create(max_user_id=102)
         igor = Employee.objects.create(store=self.store, name="Igor", account=igor_account)
         self.make_shift(igor, time(9), time(17))
@@ -153,7 +150,6 @@ class DoneCallbackTests(TestCase):
 
         self.call()
 
-        # Выходному сотруднику ничего не уходит, нажавшему список приходит ответом.
         self.assertEqual([call["user_id"] for call in self.client.sent], [igor_account.max_user_id])
         message = self.client.sent[0]
         self.assertEqual(message["text"].splitlines()[0], "«Open store» отмечено: Anna, 10:03")
@@ -180,7 +176,6 @@ class DoneCallbackTests(TestCase):
         self.assertEqual(self.instance.status, TaskStatus.DONE_ON_TIME)
 
     def test_marked_within_tolerance_is_not_called_late(self):
-        """late_minutes считается от планового времени, но допуск задачи — 15 минут."""
         self.call(now=NOW + timedelta(minutes=5))
 
         self.instance.refresh_from_db()
@@ -215,7 +210,6 @@ class DoneCallbackTests(TestCase):
         self.assertIn("Задача «Open store», плановое время 10:00.", text)
         self.assertIn("Пришлите фото торгового зала", text)
         self.assertIn("задача принимается до 10:15", text)
-        # Ждём одно действие, поэтому список кнопок сейчас не показываем.
         self.assertEqual(self.answer_payloads(), [])
 
     def test_repeated_photo_request_keeps_the_same_employee(self):
@@ -496,7 +490,6 @@ class StatusHandlerTests(TestCase):
             on_status(self.client, account or self.account)
 
     def test_task_at_shift_end_stays_on_the_list_until_its_deadline(self):
-        """Закрыли в 17:00, подтверждают в 17:10: список и кнопка ещё на месте."""
         closing = self.make_instance(
             "Closing",
             time(17),
@@ -505,7 +498,7 @@ class StatusHandlerTests(TestCase):
             available_from=time(16, 30),
         )
 
-        self.call(now=datetime(2026, 9, 21, 14, 10, tzinfo=timezone.utc))  # 17:10 по Москве
+        self.call(now=datetime(2026, 9, 21, 14, 10, tzinfo=timezone.utc))
 
         message = self.client.sent[0]
         self.assertTrue(message["text"].startswith("Задачи смены"))
@@ -514,7 +507,7 @@ class StatusHandlerTests(TestCase):
     def test_after_the_last_deadline_the_shift_is_reported_as_ended(self):
         self.make_instance("Closing", time(17), requires_photo=False, tolerance_minutes=20)
 
-        self.call(now=datetime(2026, 9, 21, 14, 25, tzinfo=timezone.utc))  # 17:25 по Москве
+        self.call(now=datetime(2026, 9, 21, 14, 25, tzinfo=timezone.utc))
 
         self.assertEqual(
             self.client.sent[0]["text"],
@@ -522,12 +515,6 @@ class StatusHandlerTests(TestCase):
         )
 
     def test_task_before_its_window_is_listed_without_a_button(self):
-        """
-        Закрытие смены в 22:00 не должно закрываться в 10:03.
-
-        Строка в списке остаётся, чтобы сотрудник видел, что его ждёт, но кнопки у неё
-        нет: нажать раньше времени нельзя.
-        """
         self.make_instance(
             "Evening count",
             time(16),
@@ -573,7 +560,6 @@ class StatusHandlerTests(TestCase):
             "○ 11:00 Prepare sales floor — отметить до 11:15\n\n"
             "Отметьте задачу кнопкой под сообщением.",
         )
-        # Задача после смены в список не попадает, кнопки — у каждой незакрытой.
         self.assertNotIn("After shift", message["text"])
         self.assertEqual(len(message["buttons"]), 3)
 
@@ -704,12 +690,6 @@ class ClaimHandlerTests(TestCase):
             on_claim(self.client, account, callback_id, self.instance.id)
 
     def test_claiming_removes_the_button_from_the_questions_already_sent(self):
-        """
-        Вопрос «Кто принимает?» и повтор за 15 минут остаются в переписке с живой кнопкой.
-
-        Как только задачу взяли, бот правит эти сообщения: текст говорит, кто её делает,
-        клавиатура снимается, нажать «Беру» задним числом уже нельзя.
-        """
         self.instance.claim_prompt_mids = ["mid-anna", "mid-igor"]
         self.instance.save(update_fields=["claim_prompt_mids"])
 
@@ -726,7 +706,6 @@ class ClaimHandlerTests(TestCase):
         self.assertEqual(self.instance.claim_prompt_mids, [])
 
     def test_failed_edit_does_not_break_claiming(self):
-        """Сообщение могли удалить вручную — задача всё равно должна закрепиться."""
         self.instance.claim_prompt_mids = ["gone"]
         self.instance.save(update_fields=["claim_prompt_mids"])
         self.client.edit_error = MaxApiError(404, "message not found")
@@ -757,7 +736,6 @@ class ClaimHandlerTests(TestCase):
             self.client.answers[-1][1].splitlines()[0],
             "Задача «Delivery» в 14:00 теперь за вами",
         )
-        # Взятая задача сразу получает кнопку «Выполнено».
         self.assertEqual(
             [row[0]["payload"] for row in self.client.answer_buttons[-1][1]],
             [f"done:{self.instance.id}"],
@@ -782,7 +760,6 @@ class ClaimHandlerTests(TestCase):
             self.client.answers[-1][1].splitlines()[0],
             "Delivery в 14:00 выполняет Anna.",
         )
-        # Чужую взятую задачу Игорю не показываем, кнопок по ней тоже нет.
         self.assertEqual(self.client.answer_buttons[-1][1], [])
         self.assertEqual(self.client.sent, [])
 
@@ -799,7 +776,6 @@ class ClaimHandlerTests(TestCase):
 
     def test_claim_task_can_only_be_completed_by_the_winner(self):
         def heading(callback_id):
-            """Первая строка ответа: доска смены идёт под ней."""
             return next(
                 text.splitlines()[0]
                 for answer_id, text in self.client.answers

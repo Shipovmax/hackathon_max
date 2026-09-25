@@ -13,7 +13,6 @@ class MaxAccount(models.Model):
     role = models.CharField(max_length=16, choices=Role.choices, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # DRF treats the authenticated MaxAccount as request.user
     is_authenticated = True
     is_anonymous = False
 

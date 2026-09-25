@@ -213,7 +213,6 @@ class SendShiftStartMessagesTests(TestCase):
             "○ 14:00 Delivery — отметить до 14:15, нужно фото\n\n"
             "Отметьте задачу кнопкой под сообщением.",
         )
-        # Кнопка на каждую задачу, подпись называет её целиком.
         self.assertEqual(
             [row[0]["text"] for row in message["buttons"]],
             [
@@ -308,8 +307,6 @@ class SendShiftStartMessagesTests(TestCase):
 
 
 class RefreshChangedBoardsTests(TestCase):
-    """Владелец правит задачи точки среди дня — смена получает обновлённый список."""
-
     def setUp(self):
         owner = MaxAccount.objects.create(max_user_id=1)
         network = Network.objects.create(owner=owner, name="Test network")
@@ -333,7 +330,6 @@ class RefreshChangedBoardsTests(TestCase):
             status=ShiftStatus.PUBLISHED,
         )
         self.client = RecordingClient()
-        # 12:00 по Москве: смена идёт, список сотрудник видел минуту назад.
         self.now = datetime(2026, 9, 21, 9, tzinfo=timezone.utc)
         self.shown_at = self.now - timedelta(minutes=1)
         self.shift.board_sent_at = self.shown_at
@@ -346,12 +342,6 @@ class RefreshChangedBoardsTests(TestCase):
         return self.touch(template, changed_at or self.now)
 
     def touch(self, template, at):
-        """
-        Ставит `updated_at` по часам теста.
-
-        Поле объявлено с `auto_now`, поэтому save() записал бы настоящее «сейчас»,
-        а тесты живут в выдуманном дне. `update()` идёт мимо `auto_now`.
-        """
         TaskTemplate.objects.filter(pk=template.pk).update(updated_at=at)
         template.refresh_from_db()
         return template
@@ -416,7 +406,7 @@ class RefreshChangedBoardsTests(TestCase):
 
     def test_finished_shift_is_not_disturbed(self):
         self.add_template("Count the till", time(15))
-        after_shift = datetime(2026, 9, 21, 15, tzinfo=timezone.utc)  # 18:00 по Москве
+        after_shift = datetime(2026, 9, 21, 15, tzinfo=timezone.utc)
 
         refresh_changed_boards(after_shift, client=self.client)
 
@@ -889,7 +879,6 @@ class ClaimSchedulerTests(TestCase):
 
     def test_escalates_to_shift_fifteen_minutes_before_deadline_once(self):
         escalation_at = self.planned - timedelta(minutes=15)
-        # Вопрос «Кто принимает?» ушёл в начале смены, задолго до повтора.
         send_claim_requests(self.shift_start, client=self.client)
         self.client.sent.clear()
 
@@ -910,12 +899,6 @@ class ClaimSchedulerTests(TestCase):
         self.assertEqual(self.instance.escalation_sent_at, escalation_at)
 
     def test_task_created_just_before_the_deadline_is_not_escalated(self):
-        """
-        Владелец завёл задачу за пару минут до срока.
-
-        «Кто принимает?» и «ещё никто не взял» ушли бы одним тиком, секунда в секунду:
-        повтор в этом случае бессмысленный, поэтому его не шлём.
-        """
         asked_at = self.planned - timedelta(minutes=2)
         send_claim_requests(asked_at, client=self.client)
         self.assertEqual(len(self.client.sent), 2)
@@ -985,13 +968,6 @@ class ClaimSchedulerTests(TestCase):
 
 @override_settings(REMINDER_FIRST_MINUTES_BEFORE=15, REMINDER_FINAL_MINUTES_BEFORE=5)
 class SendRemindersTests(TestCase):
-    """
-    Две пары напоминаний отсчитываются от планового времени и от срока задачи.
-
-    Задача стоит на 12:00 с допуском 15 минут, значит срок — 12:15 по Москве (09:15 UTC),
-    сообщения уходят в 11:45, 11:55, 12:00 и 12:10.
-    """
-
     def setUp(self):
         owner = MaxAccount.objects.create(max_user_id=1)
         network = Network.objects.create(owner=owner, name="Test network")
@@ -1106,7 +1082,6 @@ class SendRemindersTests(TestCase):
         self.assertEqual(self.instance.final_reminder_sent_at, self.final_at)
 
     def test_final_reminder_closes_the_first_one_when_the_bot_was_down(self):
-        """Слать «осталось 15 минут» задним числом уже незачем."""
         send_reminders(self.final_at, client=self.client)
         send_reminders(self.final_at + timedelta(minutes=1), client=self.client)
 

@@ -10,7 +10,6 @@ REPO_ROOT = BASE_DIR.parent
 
 load_dotenv(REPO_ROOT / ".env")
 
-# WhiteNoise warns when STATIC_ROOT does not exist yet (before collectstatic).
 warnings.filterwarnings("ignore", message="No directory at")
 
 
@@ -57,7 +56,6 @@ INSTALLED_APPS = [
     "apps.bot",
 ]
 
-# XFrameOptionsMiddleware is intentionally absent: the MAX web client may embed the mini-app in a frame.
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "config.middleware.FrameAncestorsMiddleware",
@@ -136,11 +134,8 @@ MAX_CA_BUNDLE = _ca_bundle if _ca_bundle.is_absolute() else REPO_ROOT / _ca_bund
 PUBLIC_BASE_URL = env_str("PUBLIC_BASE_URL")
 
 INIT_DATA_MAX_AGE_SECONDS = env_int("INIT_DATA_MAX_AGE_SECONDS", 86400)
-# Автоматическая проверка хакатона (DATA-API.yaml): запросы с этим токеном идут от имени
-# тестового владельца. Пусто — вход по токену выключен.
 REVIEW_API_TOKEN = env_str("REVIEW_API_TOKEN")
 REVIEW_OWNER_MAX_ID = env_int("REVIEW_OWNER_MAX_ID", 900000001)
-# Напоминания отсчитываются от срока задачи: плановое время плюс её допуск.
 REMINDER_FIRST_MINUTES_BEFORE = env_int("REMINDER_FIRST_MINUTES_BEFORE", 15)
 REMINDER_FINAL_MINUTES_BEFORE = env_int("REMINDER_FINAL_MINUTES_BEFORE", 5)
 CLAIM_ESCALATION_MINUTES_BEFORE = env_int("CLAIM_ESCALATION_MINUTES_BEFORE", 15)

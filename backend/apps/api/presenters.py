@@ -1,5 +1,3 @@
-"""Response shapes for the mini-app. They mirror frontend/src/api/types.ts."""
-
 from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
@@ -30,7 +28,6 @@ def person(employee: Employee) -> dict:
 
 
 def store_with_people(store: Store) -> dict:
-    # Убранных из списка не показываем: их держит только история отметок.
     employees = sorted(
         (e for e in store.employees.all() if e.status != EmployeeStatus.REMOVED),
         key=lambda e: (e.status == EmployeeStatus.DISMISSED, e.name),
@@ -66,7 +63,6 @@ def day_task(row: DayTaskRow, zone: ZoneInfo) -> dict:
     claim = getattr(instance, "claim", None) if instance else None
     return {
         "id": row.key,
-        # Шаблон нужен карточке точки: задачу правят прямо из списка дня.
         "template_id": row.template.id,
         "title": row.template.title,
         "planned_time": hhmm(row.template.planned_time),
@@ -90,10 +86,8 @@ def monday_of(day: date) -> date:
 
 
 def gaps_of(store: Store, dates: list[date], shifts) -> list[dict]:
-    """Uncovered parts of the working day for every date; `shifts` are (date, start, end) tuples."""
     result = []
     for day in dates:
-        # В выходной точка закрыта: пустой день — это не окно, а так и задумано.
         if store.is_closed_on(day):
             continue
         intervals = [(start, end) for shift_day, start, end in shifts if shift_day == day]
@@ -114,8 +108,6 @@ def week_status(store: Store, week_start: date) -> str:
 
 def schedule_payload(store: Store, week_start: date) -> dict:
     dates = week_dates(week_start)
-    # Только работающие: строки таблицы и её смены должны совпадать, а уволенный
-    # сотрудник точку уже не покрывает.
     shifts = list(
         Shift.objects.filter(store=store, date__in=dates, employee__status=EmployeeStatus.ACTIVE).order_by(
             "date", "start_time", "employee__name"

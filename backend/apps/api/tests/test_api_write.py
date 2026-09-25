@@ -110,8 +110,6 @@ class EmployeeTests(OwnerApiTestCase):
 
 
 class EmployeeRemovalTests(OwnerApiTestCase):
-    """Убрать уволенного из списка, не потеряв историю его отметок."""
-
     def names(self):
         return [p["name"] for p in self.call("get", "/stores/").json()[0]["employees"]]
 
@@ -143,7 +141,6 @@ class EmployeeRemovalTests(OwnerApiTestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.names(), ["Igor"])
-        # Запись и отметка целы: в карточке дня видно, кто закрыл задачу.
         self.anna.refresh_from_db()
         self.assertEqual(self.anna.status, "removed")
         completion.refresh_from_db()
@@ -267,12 +264,6 @@ class TaskTemplateTests(OwnerApiTestCase):
         self.assertEqual(self.call("delete", f"/task-templates/{created['id']}/").status_code, 404)
 
     def test_every_change_moves_updated_at_for_the_shift_board(self):
-        """
-        По `updated_at` планировщик рассылает смене обновлённый список задач.
-
-        Отдельная проверка нужна из-за `save(update_fields=...)`: Django не трогает
-        поля с `auto_now`, если их не перечислить, и удаление задачи прошло бы тихо.
-        """
         created = self.call("post", self.path(), {"title": "Opening", "planned_time": "09:00"}).json()
         template = TaskTemplate.objects.get(pk=created["id"])
         after_create = template.updated_at
@@ -376,7 +367,6 @@ class ScheduleTests(OwnerApiTestCase):
     def test_employee_of_another_store_is_rejected_and_a_dismissed_one_is_skipped(self):
         stranger = Employee.objects.create(store=self.other_owner(), name="Oleg")
         self.assertEqual(self.call("put", self.url(), self.draft([shift(stranger, 0)])).status_code, 400)
-        # Смену уволенного не сохраняем, но и сохранение остальных из-за неё не ломаем.
         self.igor.status = "dismissed"
         self.igor.save()
         self.assertEqual(self.call("put", self.url(), self.draft([shift(self.igor, 0)])).status_code, 200)
@@ -394,8 +384,6 @@ class ScheduleTests(OwnerApiTestCase):
 
 
 class StoreEditTests(OwnerApiTestCase):
-    """Точку правят после создания: часы работы и выходные меняются со временем."""
-
     def url(self):
         return f"/stores/{self.store.id}/"
 
@@ -439,8 +427,6 @@ class StoreEditTests(OwnerApiTestCase):
 
 
 class ScheduleDaysOffTests(OwnerApiTestCase):
-    """Пустой выходной в графике — это не окно, и красным его не подсвечиваем."""
-
     def test_day_off_is_not_reported_as_a_gap(self):
         sunday = MONDAY + dt.timedelta(days=6)
         self.call("patch", f"/stores/{self.store.id}/", {"closed_weekdays": [6]})
@@ -457,14 +443,6 @@ class ScheduleDaysOffTests(OwnerApiTestCase):
 
 
 class FormerEmployeeShiftsTests(OwnerApiTestCase):
-    """
-    Смены уволенного не должны мешать графику.
-
-    Случай с «Ленина, 14»: у убранного из списка сотрудника осталась смена на неделе,
-    приложение присылало её вместе с остальными, и правка смены Якова падала с
-    «Сотрудник не найден на этой точке».
-    """
-
     def url(self, suffix=""):
         return f"/stores/{self.store.id}/schedule/{suffix}"
 
@@ -484,17 +462,14 @@ class FormerEmployeeShiftsTests(OwnerApiTestCase):
         self.igor.save(update_fields=["status"])
 
         week = self.call("get", self.url(f"?week={MONDAY}")).json()
-        # Как делает приложение: берёт смены недели, правит одну и присылает все.
         shifts = week["shifts"] + [shift(self.anna, 1, "10:00", "18:00")]
         response = self.call("put", self.url(), {"week_start": MONDAY.isoformat(), "shifts": shifts})
 
         self.assertEqual(response.status_code, 200, response.json())
         self.assertEqual([s["employee_id"] for s in response.json()["shifts"]], [self.anna.id])
-        # Прошлая смена уволенного — история, её сохранение графика не стирает.
         self.assertTrue(Shift.objects.filter(pk=past.pk).exists())
 
     def test_app_opened_before_the_dismissal_can_still_save(self):
-        """Старая вкладка присылает смену уже уволенного — сервер её пропускает, а не падает."""
         self.igor.status = "dismissed"
         self.igor.save(update_fields=["status"])
         draft = {"week_start": MONDAY.isoformat(), "shifts": [shift(self.igor, 2), shift(self.anna, 2)]}

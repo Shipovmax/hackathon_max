@@ -19,8 +19,6 @@ class Store(models.Model):
     open_time = models.TimeField()
     close_time = models.TimeField()
     timezone = models.CharField(max_length=64, default="Europe/Moscow")
-    # Дни недели, когда точка закрыта: 0 — понедельник, 6 — воскресенье. В эти дни
-    # ежедневные задачи не создаются, а пустой день в графике не считается окном.
     closed_weekdays = models.JSONField(default=list, blank=True)
     is_active = models.BooleanField(default=True)
 

@@ -10,12 +10,8 @@ import { App } from './App';
 import { getPlatform, startRoute } from './max/bridge';
 import { useTheme } from './max/theme';
 
-// Диплинк из уведомления подставляем в адрес до старта роутера, чтобы «Назад»
-// вёл на сводку, а не наружу из приложения.
 const deepLink = startRoute();
 if (deepLink && window.location.pathname === '/') {
-  // Сводка остаётся в истории, поэтому «Назад» из карточки ведёт на неё, а не
-  // закрывает приложение.
   window.history.pushState(null, '', deepLink);
 }
 

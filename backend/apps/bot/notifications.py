@@ -10,7 +10,6 @@ def _store_deep_link(instance) -> list[list[dict]]:
 
 
 def notify_owner_overdue(instance, client=None) -> None:
-    """Once per task when the tolerance expires without a completion (CLAUDE.md §5)."""
     store = instance.template.store
     sender = client or MaxClient()
     sender.send_message(
@@ -25,7 +24,6 @@ def notify_owner_overdue(instance, client=None) -> None:
 
 
 def notify_owner_closed_late(instance, client=None) -> None:
-    """Closing notification, sent once when an overdue task is finally completed."""
     store = instance.template.store
     completion = instance.completion
     sender = client or MaxClient()
@@ -43,7 +41,6 @@ def notify_owner_closed_late(instance, client=None) -> None:
 
 
 def notify_owner_unclaimed(instance, client=None) -> None:
-    """«Задачу никто не взял»: a claim task nobody took by its planned time."""
     store = instance.template.store
     sender = client or MaxClient()
     sender.send_message(

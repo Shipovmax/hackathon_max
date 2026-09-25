@@ -16,7 +16,6 @@ UTC = dt.timezone.utc
 
 
 def moscow(hour: int, minute: int = 0, day: dt.date | None = None) -> dt.datetime:
-    """An aware datetime for a Moscow wall-clock time (UTC+3, no DST)."""
     day = day or dt.date(2026, 9, 21)
     return dt.datetime.combine(day, dt.time(hour, minute), tzinfo=dt.timezone(dt.timedelta(hours=3)))
 

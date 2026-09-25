@@ -27,8 +27,6 @@ def claim_button(instance_id: int) -> list[list[dict]]:
     return [[callback_button("Беру", f"claim:{instance_id}")]]
 
 
-# Платформа разрешает 210 кнопок в 30 рядах; столько задач на одной смене не бывает,
-# но ограничение соблюдаем, чтобы длинный список не уронил отправку сообщения.
 MAX_TASK_BUTTONS = 28
 BUTTON_TITLE_LIMIT = 30
 
@@ -38,13 +36,6 @@ def _short(title: str) -> str:
 
 
 def task_buttons(rows: list[tuple[int, str, str, bool]]) -> list[list[dict]]:
-    """
-    По кнопке на каждую незакрытую задачу смены: `(id, время, название, нужно ли «Беру»)`.
-
-    Кнопка называет задачу целиком — у сотрудника их несколько, и «Выполнено» без названия
-    не даёт понять, что именно отмечаешь. Каждая кнопка в своём ряду: на телефоне подпись
-    из двух задач в ряду обрезается.
-    """
     buttons = []
     for instance_id, at, title, needs_claim in rows[:MAX_TASK_BUTTONS]:
         if needs_claim:
@@ -55,7 +46,6 @@ def task_buttons(rows: list[tuple[int, str, str, bool]]) -> list[list[dict]]:
 
 
 def miniapp_link(start_param: str = "") -> str:
-    """Deep link that opens the mini-app; start_param allows [A-Za-z0-9_-] up to 512 chars."""
     suffix = f"={start_param}" if start_param else ""
     return f"https://max.ru/{settings.BOT_USERNAME}?startapp{suffix}"
 

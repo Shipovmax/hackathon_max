@@ -11,8 +11,6 @@ REVIEW_OWNER = 900000001
 
 @override_settings(REVIEW_API_TOKEN=REVIEW_TOKEN, REVIEW_OWNER_MAX_ID=REVIEW_OWNER)
 class ReviewTokenTests(OwnerApiTestCase):
-    """Вход робота проверки хакатона: отдельный тестовый владелец, до чужих сетей не достаёт."""
-
     def review(self, method: str, path: str, data=None, token: str = REVIEW_TOKEN):
         return getattr(self.api, method)(
             f"/api{path}", data, format="json", HTTP_AUTHORIZATION=f"Bearer {token}"

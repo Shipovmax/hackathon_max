@@ -23,7 +23,6 @@ const STATUS: Record<Person['status'], string> = {
 
 export function People() {
   const state = useApi<StoreWithPeople[]>('/stores/');
-  // Форма точки: 'new' — новая, объект — правка уже созданной.
   const [storeForm, setStoreForm] = useState<StoreWithPeople | 'new' | null>(null);
   const [newEmployeeAt, setNewEmployeeAt] = useState<StoreWithPeople | null>(null);
   const [person, setPerson] = useState<{ store: StoreWithPeople; person: Person } | null>(null);
@@ -115,15 +114,10 @@ export function People() {
 
 const BLANK_STORE: StoreInput = { name: '', address: '', open_time: '10:00', close_time: '22:00', closed_weekdays: [] };
 
-/** «выходные: сб, вс» — подпись под часами работы точки. */
 function daysOffLabel(days: number[]): string {
   return days.length ? `выходные: ${days.map((day) => WEEKDAYS[day]).join(', ')}` : 'без выходных';
 }
 
-/**
- * Точка: и новая, и уже созданная. Часы работы и выходные меняются со временем —
- * летний график, новый выходной, — поэтому форма одна на оба случая.
- */
 function StoreForm({
   store,
   onClose,
@@ -304,7 +298,6 @@ function PersonCard({
   const { person } = data;
   const shownCode = code ?? person.invite_code;
 
-  // Код владелец передаёт человеку в переписке, поэтому копирование важнее вида.
   const copy = (value: string) => {
     navigator.clipboard?.writeText(value).then(
       () => toast.show('Код скопирован'),

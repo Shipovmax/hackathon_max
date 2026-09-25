@@ -10,10 +10,7 @@ from ..presenters import day_task
 from ..scoping import get_store, hhmm, owner_network, parse_date
 
 DONE = {TaskStatus.DONE_ON_TIME, TaskStatus.DONE_LATE}
-# Красный: задача не сделана. Жёлтый: сделана, но позже срока — владельца уже уведомили,
-# вмешиваться не нужно, но точке стоит присмотреться.
 NOT_DONE = {TaskStatus.OVERDUE, TaskStatus.MISSED}
-# Сначала то, что горит, потом опоздания, потом всё в порядке.
 HEALTH_ORDER = {"unclaimed": 0, "overdue": 0, "late": 1, "ok": 2}
 
 
@@ -56,7 +53,6 @@ class DashboardView(APIView):
                 }
             )
 
-        # Stores with problems come first, so the owner does not have to hunt for them.
         stores.sort(key=lambda item: HEALTH_ORDER[item["health"]])
         return Response({"date": day.isoformat(), "stores": stores})
 

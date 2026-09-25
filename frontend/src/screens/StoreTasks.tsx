@@ -33,8 +33,6 @@ const blank = (kind: TaskTemplateItem['kind']): TaskTemplateInput => {
     on_date: kind === 'daily' ? null : today(),
     tolerance_minutes: 15,
     requires_photo: true,
-    // «Беру» — осознанный выбор владельца, а не значение по умолчанию: задача
-    // с ним требует, чтобы кто-то из смены её принял.
     requires_claim: false,
   };
 };

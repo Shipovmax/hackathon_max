@@ -6,9 +6,7 @@ import { Icon } from './Icon';
 interface DateNavProps {
   date: string;
   onChange: (date: string) => void;
-  /** Последний день, до которого можно листать вперёд; null — без ограничения. */
   maxDate?: string | null;
-  /** Дата становится кнопкой нативного календаря. */
   calendar?: boolean;
 }
 

@@ -16,7 +16,6 @@ def find_gaps(
     shifts: list[tuple[time, time]],
     tolerance_minutes: int,
 ) -> list[tuple[time, time]]:
-    """Uncovered parts of the working day. Gaps of at most `tolerance_minutes` at the edges or between shifts do not count."""
     open_at, close_at = _minutes(day_open), _minutes(day_close)
 
     merged: list[list[int]] = []

@@ -13,7 +13,6 @@ interface ToastApi {
 
 const ToastContext = createContext<ToastApi>({ show: () => {} });
 
-/** Короткое подтверждение результата действия: «Сохранено», «График опубликован». */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<Toast | null>(null);
 

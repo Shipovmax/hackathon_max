@@ -2,14 +2,10 @@ from datetime import time
 
 from django.db import migrations, models
 
-# Насколько раньше планового времени задачу можно отметить у шаблонов, заведённых
-# до появления поля. Полчаса — запас на «открылись чуть раньше», но не на «закрыл
-# магазин в обед».
 DEFAULT_LEAD_MINUTES = 30
 
 
 def earlier(value: time, minutes: int) -> time:
-    """Время минус минуты, без перехода через полночь."""
     shifted = value.hour * 60 + value.minute - minutes
     return time.min if shifted <= 0 else time(shifted // 60, shifted % 60)
 
@@ -23,11 +19,10 @@ def fill_available_from(apps, schema_editor):
 
 
 def drop_available_from(apps, schema_editor):
-    """Обратная миграция ничего не восстанавливает: поле просто исчезает."""
+    pass
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("core", "0005_taskinstance_claim_prompt_mids"),
     ]

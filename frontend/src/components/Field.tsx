@@ -50,10 +50,6 @@ interface DateFieldProps {
   onChange: (value: string) => void;
 }
 
-/**
- * Дата разовой задачи. Нативный `input[type=date]` в мобильном MAX выглядит как
- * блёклая строчка, поэтому подписываем выбранную дату по-русски рядом с полем.
- */
 export function DateField({ value, onChange }: DateFieldProps) {
   return (
     <div className="datefield">

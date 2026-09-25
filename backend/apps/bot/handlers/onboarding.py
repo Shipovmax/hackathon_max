@@ -106,10 +106,11 @@ def on_message_created(client, update: dict) -> None:
 
     if text in ("/start", "/role"):
         return ask_role(client, account)
-    if account.role == Role.EMPLOYEE:
+    employee = bound_employee(account)
+    if account.role == Role.EMPLOYEE or employee is not None:
         if any(item.get("type") == "image" for item in attachments):
             return tasks.on_photo(client, account, message)
-        if bound_employee(account) is None:
+        if employee is None:
             return reply_to_code(client, account, text)
         if text.lower() in ("что осталось", "/status"):
             return tasks.on_status(client, account)

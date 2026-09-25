@@ -2,7 +2,6 @@ from django.urls import path
 
 from . import views
 
-# Endpoints the mini-app does not call yet stay as 501 stubs.
 STUBS = [
     ("network/", "network"),
 ]

@@ -1,12 +1,12 @@
+from datetime import time
 from unittest import mock
 
 from django.test import TestCase
 
 from apps.bot import texts
 from apps.bot.dispatcher import dispatch
-from apps.core.models import MaxAccount, Network, Role
+from apps.core.models import Employee, MaxAccount, Network, Role, Store
 
-# Update shapes mirror real MAX payloads; ids and names are made up.
 USER = {"user_id": 5001, "first_name": "Test", "is_bot": False, "name": "Test"}
 BOT = {"user_id": 9001, "is_bot": True, "name": "Bot", "username": "test_bot"}
 DIALOG = {"chat_type": "dialog", "chat_id": 700, "user_id": 9001}
@@ -83,6 +83,31 @@ class DispatchTests(TestCase):
         with mock.patch("apps.bot.handlers.tasks.on_photo") as on_photo:
             dispatch(self.client, message(attachments=PHOTO))
         on_photo.assert_called_once()
+
+    def bind_owner_as_employee(self):
+        account = MaxAccount.objects.create(max_user_id=5001, role=Role.OWNER)
+        network = Network.objects.create(owner=account, name="Mine")
+        store = Store.objects.create(network=network, name="Lenina, 14", open_time=time(9), close_time=time(22))
+        Employee.objects.create(store=store, name="Owner", account=account)
+
+    def test_bound_owner_can_send_a_photo_without_switching_role(self):
+        self.bind_owner_as_employee()
+        with mock.patch("apps.bot.handlers.tasks.on_photo") as on_photo:
+            dispatch(self.client, message(attachments=PHOTO))
+        on_photo.assert_called_once()
+
+    def test_bound_owner_can_ask_what_is_left(self):
+        self.bind_owner_as_employee()
+        with mock.patch("apps.bot.handlers.tasks.on_status") as on_status:
+            dispatch(self.client, message("что осталось"))
+        on_status.assert_called_once()
+
+    def test_owner_text_is_not_taken_for_an_invite_code(self):
+        MaxAccount.objects.create(max_user_id=5001, role=Role.OWNER)
+        with mock.patch("apps.bot.handlers.onboarding.reply_to_code") as reply_to_code:
+            dispatch(self.client, message("ABCD1234"))
+        reply_to_code.assert_not_called()
+        self.assertEqual(self.client.sent[0]["text"], texts.UNKNOWN)
 
     def test_unknown_callback_is_answered(self):
         dispatch(self.client, callback("nope:1"))

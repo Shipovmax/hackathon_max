@@ -12,20 +12,16 @@ class MaxApiError(Exception):
 
 
 def build_ssl_context() -> ssl.SSLContext:
-    # platform-api2.max.ru is signed by the Russian Trusted Root CA, which system trust stores lack.
     context = ssl.create_default_context()
     context.load_verify_locations(cafile=str(settings.MAX_CA_BUNDLE))
     return context
 
 
 def message_id_of(response: dict) -> str | None:
-    """Идентификатор отправленного сообщения: он нужен, чтобы потом его поправить."""
     return ((response or {}).get("message") or {}).get("body", {}).get("mid")
 
 
 class MaxClient:
-    """Thin wrapper over https://platform-api2.max.ru. Limits: 30 rps overall, 2 messages/sec per dialog."""
-
     def __init__(self, token: str | None = None):
         self._context = build_ssl_context()
         self._http = httpx.Client(
@@ -76,7 +72,6 @@ class MaxClient:
         text: str,
         buttons: list[list[dict]] | None = None,
     ) -> dict:
-        # Правка уже отправленного сообщения. Пустой список вложений убирает клавиатуру.
         attachments = []
         if buttons:
             attachments = [{"type": "inline_keyboard", "payload": {"buttons": buttons}}]
@@ -94,7 +89,6 @@ class MaxClient:
         text: str,
         buttons: list[list[dict]] | None = None,
     ) -> dict:
-        # Replaces the message that carried the pressed button.
         attachments = []
         if buttons:
             attachments = [{"type": "inline_keyboard", "payload": {"buttons": buttons}}]
@@ -106,7 +100,6 @@ class MaxClient:
         )
 
     def download_file(self, url: str) -> bytes:
-        # Media CDN (i.oneme.ru) is a different host: never send the bot token there.
         response = httpx.get(url, verify=self._context, timeout=30.0, follow_redirects=True)
         response.raise_for_status()
         return response.content

@@ -1,5 +1,3 @@
-// Draft contract, mirrors backend/apps/api/urls.py. Times are "HH:MM", dates are "YYYY-MM-DD".
-
 export type TaskStatus =
   | 'scheduled'
   | 'reminded'
@@ -10,7 +8,6 @@ export type TaskStatus =
   | 'unclaimed'
   | 'missed';
 
-/** ok — всё вовремя, late — сделано позже срока, overdue/unclaimed — не сделано. */
 export type StoreHealth = 'ok' | 'late' | 'overdue' | 'unclaimed';
 
 export interface Me {
@@ -36,7 +33,6 @@ export interface Dashboard {
 
 export interface DayTask {
   id: number;
-  /** Шаблон задачи: по нему карточка точки открывает редактирование прямо из списка дня. */
   template_id: number;
   title: string;
   planned_time: string;
@@ -53,7 +49,6 @@ export interface DayTask {
 export interface StoreDay {
   store: { id: number; name: string };
   date: string;
-  /** Выходной точки: ежедневных задач в этот день нет. */
   closed: boolean;
   on_shift: { name: string; start: string; end: string }[];
   tasks: DayTask[];
@@ -77,7 +72,6 @@ export interface Schedule {
   status: 'draft' | 'published';
   open_time: string;
   close_time: string;
-  /** Дни недели, когда точка закрыта: 0 — пн, 6 — вс. */
   closed_weekdays: number[];
   employees: { id: number; name: string }[];
   shifts: ShiftInput[];
@@ -98,7 +92,6 @@ export interface TaskTemplateItem {
   title: string;
   kind: 'daily' | 'one_time';
   planned_time: string;
-  /** Раньше этого времени задачу отметить нельзя. */
   available_from: string;
   on_date: string | null;
   tolerance_minutes: number;
@@ -121,7 +114,6 @@ export interface StoreWithPeople {
   address: string;
   open_time: string;
   close_time: string;
-  /** Дни недели, когда точка закрыта: 0 — пн, 6 — вс. */
   closed_weekdays: number[];
   employees: Person[];
 }

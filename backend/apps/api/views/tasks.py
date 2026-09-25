@@ -27,18 +27,15 @@ DEFAULTS = {
 }
 
 
-# Насколько раньше планового времени задачу можно отметить, если окно не указали.
 DEFAULT_LEAD_MINUTES = 30
 
 
 def default_available_from(planned: time) -> time:
-    """Полчаса до планового времени, без перехода через полночь."""
     minutes = planned.hour * 60 + planned.minute - DEFAULT_LEAD_MINUTES
     return time.min if minutes <= 0 else time(minutes // 60, minutes % 60)
 
 
 def clean_template(values: dict) -> dict:
-    """Validate a complete set of template fields, whether it comes from POST or from a merged PATCH."""
     kind = values.get("kind")
     if kind not in TaskKind.values:
         raise bad_request("Тип задачи: ежедневная или разовая на дату")
@@ -110,9 +107,6 @@ class TaskTemplateDetailView(APIView):
 
     def delete(self, request, template_id):
         template = get_template(request, template_id)
-        # Deactivate instead of deleting: the history of completed tasks stays intact.
         template.is_active = False
-        # updated_at is auto_now, and Django skips auto_now fields left out of
-        # update_fields. Without it the shift board would keep the deleted task.
         template.save(update_fields=["is_active", "updated_at"])
         return Response(status=status.HTTP_204_NO_CONTENT)

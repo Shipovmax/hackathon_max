@@ -7,8 +7,6 @@ DRAFT = {"week_start": "2026-09-21", "shifts": []}
 
 
 class BadInputTests(OwnerApiTestCase):
-    """Мусор на входе — понятная ошибка 400, а не падение сервера."""
-
     def setUp(self):
         super().setUp()
         self.template = make_template(self.store, "Opening", at=(9, 0))

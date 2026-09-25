@@ -18,7 +18,6 @@ def store_today(store: Store, now: datetime | None = None) -> date:
 
 
 def planned_at(instance: TaskInstance) -> datetime:
-    """Planned moment of the task in the store's timezone."""
     template = instance.template
     return datetime.combine(instance.date, template.planned_time, tzinfo=store_zone(template.store))
 
@@ -31,20 +30,11 @@ DONE_STATUSES = (TaskStatus.DONE_ON_TIME, TaskStatus.DONE_LATE)
 
 
 def evaluate_status(instance: TaskInstance, now: datetime) -> str:
-    """
-    Status the task has at `now`, derived from what was actually recorded (CLAUDE.md, section 5).
-
-    Итог, который уже наступил, по текущим настройкам задачи не пересчитывается. Владелец
-    может поднять допуск или сдвинуть время — это план на будущее. Вчерашнее опоздание
-    от этого не становится «вовремя», а просрочка, о которой ему уже сообщили, не исчезает.
-    """
     template = instance.template
     completion = _related(instance, "completion")
     if completion is not None:
-        # Вердикт записан в момент отметки, см. mark_done.
         if instance.status in DONE_STATUSES:
             return instance.status
-        # Отметки, сделанные до того, как вердикт стали записывать.
         late = completion.late_minutes > template.tolerance_minutes
         return TaskStatus.DONE_LATE if late else TaskStatus.DONE_ON_TIME
 
@@ -59,8 +49,6 @@ def evaluate_status(instance: TaskInstance, now: datetime) -> str:
     ):
         return TaskStatus.AWAITING_PHOTO
 
-    # Владельцу уже сообщили: задачу не сделали в срок или её никто не взял. Это факт,
-    # и правка задачи задним числом его не отменяет.
     if instance.overdue_notified_at is not None:
         if not template.requires_claim:
             return TaskStatus.MISSED if past_day else TaskStatus.OVERDUE
@@ -83,7 +71,6 @@ def mark_done(
     photo: bytes | None = None,
     photo_token: str = "",
 ) -> Completion:
-    """Record the completion. Lateness is measured from the planned time, status from the task's tolerance."""
     existing = _related(instance, "completion")
     if existing is not None:
         return existing
@@ -101,9 +88,6 @@ def mark_done(
         if photo:
             completion.photo.save(f"task-{instance.id}.jpg", ContentFile(photo), save=False)
         completion.save()
-        # Вердикт фиксируем сейчас и больше не пересчитываем. Если владельцу уже сообщили
-        # о просрочке, отметка — опоздание, даже если допуск потом увеличили: срок, о котором
-        # он узнал, прошёл.
         overdue_reported = instance.overdue_notified_at is not None and not template.requires_claim
         was_late = late > template.tolerance_minutes or overdue_reported
         instance.status = TaskStatus.DONE_LATE if was_late else TaskStatus.DONE_ON_TIME
@@ -114,13 +98,6 @@ def mark_done(
 
 
 def templates_for(store: Store, day: date) -> list:
-    """
-    Active templates that make up the store's task list for `day`.
-
-    Daily tasks skip the store's weekly days off: nobody opens a closed shop, and an
-    «overdue opening» on a Sunday would only produce a false alarm. A one-time task on a
-    day off stays — the owner put it on that date on purpose.
-    """
     closed = store.is_closed_on(day)
     return [
         template
@@ -130,7 +107,6 @@ def templates_for(store: Store, day: date) -> list:
 
 
 def ensure_instances(store: Store, day: date) -> list[TaskInstance]:
-    """Create the day's TaskInstance rows from active templates. Safe to call repeatedly."""
     templates = templates_for(store, day)
     for template in templates:
         TaskInstance.objects.get_or_create(template=template, date=day)

@@ -1,7 +1,3 @@
-// Демо-данные для работы над интерфейсом без бэкенда (VITE_USE_MOCKS=1).
-// Это тестовые данные: магазинов, людей и отметок из этого файла не существует.
-// Хранилище изменяемое, поэтому редактирование работает так же, как будет с API,
-// но живёт до перезагрузки страницы.
 import { findGaps } from '../lib/coverage';
 import { addDays, DEFAULT_LEAD_MINUTES, earlierBy, minutesOf, today, weekdayIndex, weekStart } from '../lib/format';
 import { ApiError } from './errors';
@@ -24,8 +20,6 @@ import type {
 
 const TODAY = today();
 
-/** Время незадолго до «сейчас»: сценарий с невзятой поставкой должен быть виден
-    в демо в любой час, а не только после 14:00. */
 function recentTime(minutesBack: number): string {
   const moment = new Date(Date.now() - minutesBack * 60_000);
   const rounded = Math.floor(moment.getMinutes() / 30) * 30;
@@ -36,7 +30,6 @@ const DELIVERY_TIME = recentTime(90);
 const THIS_WEEK = weekStart(TODAY);
 const NEXT_WEEK = addDays(THIS_WEEK, 7);
 
-// Заглушка вместо снимка торгового зала: настоящие фото приходят из бота.
 const DEMO_PHOTO =
   'data:image/svg+xml;utf8,' +
   encodeURIComponent(
@@ -195,8 +188,6 @@ function storeOfEmployee(employeeId: number): [Store, Person] {
 const inviteCode = () =>
   Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
 
-// --- день точки -------------------------------------------------------------
-
 function onShift(storeId: number, date: string) {
   const people = store(storeId).employees;
   return (db.shifts[storeId] ?? [])
@@ -209,7 +200,6 @@ function onShift(storeId: number, date: string) {
     .sort((a, b) => minutesOf(a.start) - minutesOf(b.start));
 }
 
-/** Статусы выводим из времени, чтобы демо выглядело живым в любой день. */
 function dayTasks(storeId: number, date: string): DayTask[] {
   const shift = onShift(storeId, date);
   const now = new Date();
@@ -238,7 +228,6 @@ function dayTasks(storeId: number, date: string): DayTask[] {
       };
 
       if (!passed) return { ...base, status: 'scheduled' };
-      // Сценарий для демо: на первой точке открытие сегодня с опозданием, поставку никто не взял.
       if (storeId === 1 && date === TODAY && item.requires_claim) return { ...base, status: 'unclaimed' };
       if (storeId === 1 && date === TODAY && index === 0) {
         return {
@@ -293,8 +282,6 @@ function dashboard(date: string): Dashboard {
   return { date, stores: stores.sort((a, b) => rank(a.health) - rank(b.health)) };
 }
 
-// --- график -----------------------------------------------------------------
-
 const weekDates = (week: string) => Array.from({ length: 7 }, (_, index) => addDays(week, index));
 
 function gapsOf(storeId: number, week: string, shifts?: ShiftInput[]): Gap[] {
@@ -328,8 +315,6 @@ function saveSchedule(storeId: number, draft: ScheduleDraft): Schedule {
   db.shifts[storeId] = [...others, ...draft.shifts];
   return schedule(storeId, draft.week_start);
 }
-
-// --- маршруты ---------------------------------------------------------------
 
 type Handler = (params: string[], query: URLSearchParams, body: unknown) => unknown;
 
@@ -397,7 +382,6 @@ const routes: [string, RegExp, Handler][] = [
     if (employee.status !== 'dismissed') {
       throw new ApiError(409, 'conflict', 'Сначала отметьте, что сотрудник уволен');
     }
-    // На сервере запись с историей остаётся ради отметок, но из списка пропадает так же.
     item.employees = item.employees.filter((person) => person.id !== employee.id);
     return null;
   }],

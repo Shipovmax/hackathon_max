@@ -9,10 +9,7 @@ interface AccessProblemProps {
   notOwner?: boolean;
 }
 
-/** Тупика быть не должно: всегда видно, что случилось и что делать дальше. */
 export function AccessProblem({ error, onRetry, notOwner }: AccessProblemProps) {
-  // describeError уже говорит, что делать, поэтому подсказку добавляем только там,
-  // где повтор не поможет.
   let message = error ? describeError(error) : 'Не удалось загрузить данные.';
   let hint = '';
   let retry = true;

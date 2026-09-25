@@ -16,15 +16,12 @@ import { StatusDot, TaskStatusBadge, taskTone } from '../components/StatusBadge'
 import { TaskEditor } from '../components/TaskEditor';
 import { formatRange, minutesOf, today } from '../lib/format';
 
-// Итог этих задач уже наступил: его записали, и правка задачи его не меняет.
 const SETTLED: TaskStatus[] = ['done_on_time', 'done_late', 'overdue', 'missed', 'unclaimed'];
 
-/** Задачу правят только пока её итог не наступил: прошлый день и закрытые задачи — история. */
 function isEditable(task: DayTask, date: string): boolean {
   return date >= today() && !SETTLED.includes(task.status);
 }
 
-// Плановое время стоит слева, поэтому в подписи только то, что произошло.
 function subtitle(task: DayTask): string {
   if (task.done_by && task.done_at) {
     const late =
@@ -41,7 +38,6 @@ function subtitle(task: DayTask): string {
 export function StoreDay() {
   const { storeId } = useParams();
   const navigate = useNavigate();
-  // Дата живёт в адресе: диплинк из уведомления открывает нужный день сразу.
   const [params, setParams] = useSearchParams();
   const date = params.get('date') ?? today();
   const setDate = useCallback(
@@ -54,13 +50,6 @@ export function StoreDay() {
   const toast = useToast();
   const state = useApi<StoreDayData>(`/stores/${storeId}/day/?date=${date}`);
 
-  /**
-   * Правка задачи прямо из списка дня.
-   *
-   * В списке лежит задача на дату, а править надо шаблон точки, поэтому берём его
-   * с сервера по `template_id`. Отдельного эндпоинта для одного шаблона нет,
-   * а список задач точки короткий, так что читаем его целиком.
-   */
   const openTask = async (task: DayTask) => {
     if (!isEditable(task, date)) {
       toast.show('Итог этой задачи уже записан и не меняется. Настройки на будущие дни — в «Задачи точки»');
@@ -80,14 +69,12 @@ export function StoreDay() {
     }
   };
 
-  // Черта «сейчас» показывает, что уже должно было произойти, а что впереди.
   const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
 
   return (
     <AsyncView state={state}>
       {(data) => {
         const upcoming = data.tasks.findIndex((task) => minutesOf(task.planned_time) > nowMinutes);
-        // Все задачи дня позади — черта уходит под список.
         const nowIndex = date !== today() ? -1 : upcoming === -1 ? data.tasks.length : upcoming;
         return (
         <Screen
@@ -97,7 +84,6 @@ export function StoreDay() {
           backTo="/"
         >
           <div className="screen__block">
-            {/* Вперёд листать можно: задачи будущих дней строятся по шаблонам точки. */}
             <DateNav date={date} onChange={setDate} maxDate={null} />
           </div>
 

@@ -10,7 +10,6 @@ from ..scoping import bad_request, get_store, parse_date, parse_time, request_bo
 
 
 def parse_draft(request, store):
-    """Validate {week_start, shifts} from the body: returns the week's Monday and parsed shift tuples."""
     body = request_body(request)
     week_start = monday_of(parse_date(body.get("week_start")))
     items = body.get("shifts")
@@ -29,8 +28,6 @@ def parse_draft(request, store):
         employee = people.get(employee_id)
         if employee is None:
             raise bad_request("Сотрудник не найден на этой точке")
-        # Смены уволенных график не правит: прошлые остаются историей, а приложение,
-        # открытое до увольнения, могло прислать их вместе с остальными.
         if employee.status != EmployeeStatus.ACTIVE:
             continue
         day = parse_date(item.get("date"))
@@ -49,11 +46,9 @@ def parse_draft(request, store):
 
 
 def save_week(store, week_start, parsed, *, publish: bool) -> None:
-    """Replace the week's shifts. A week that is already published stays published, so edits go live at once."""
     keep_published = publish or week_status(store, week_start) == "published"
     status = ShiftStatus.PUBLISHED if keep_published else ShiftStatus.DRAFT
     with transaction.atomic():
-        # Заменяем смены только работающих: смены уволенных — история, её не трогаем.
         Shift.objects.filter(
             store=store, date__in=week_dates(week_start), employee__status=EmployeeStatus.ACTIVE
         ).delete()

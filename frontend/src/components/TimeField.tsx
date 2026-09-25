@@ -3,7 +3,6 @@ import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { isValidTime } from '../lib/format';
 
-/** Высота строки колеса, px. Держим в паре с --wheel-item в styles.css. */
 const ITEM = 40;
 const HOURS = Array.from({ length: 24 }, (_, index) => index);
 const MINUTES = Array.from({ length: 60 }, (_, index) => index);
@@ -18,25 +17,17 @@ interface WheelProps {
   onChange: (value: number) => void;
 }
 
-/** Одно колесо: прокрутка «щёлкает» по строкам, выбранная строка стоит по центру. */
 function Wheel({ label, values, value, onChange }: WheelProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const timer = useRef(0);
   const held = useRef(false);
   const loop = [...values, ...values, ...values];
-  // Строка, на которой стоит колесо. С внешним значением она расходится, только когда его
-  // изменили снаружи (открылась панель, нажали стрелку): тогда колесо переставляем. Пока
-  // человек крутит сам, новое значение уходит наружу и здесь совпадает с ним.
   const shown = useRef<number | null>(null);
-  // Строка, к которой колесо едет после тапа. Пока едет, промежуточные строки не выбираем:
-  // иначе тап по «08» от «22» мог остановиться на «18», если прокрутка запнулась.
   const picking = useRef<number | null>(null);
 
   const moveTo = (target: number) => {
     const element = scroller.current;
     if (!element) return;
-    // Всегда возвращаемся в среднюю копию списка. Сверху и снизу остаётся ещё
-    // по полному кругу, поэтому 23 → 00 и 59 → 00 ощущаются непрерывно.
     const top = (values.length + Math.max(0, values.indexOf(target))) * ITEM;
     if (Math.abs(element.scrollTop - top) > 1) element.scrollTop = top;
   };
@@ -55,8 +46,6 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
     if (picking.current === null) {
       let rawIndex = Math.round(element.scrollTop / ITEM);
       const logicalIndex = ((rawIndex % values.length) + values.length) % values.length;
-      // Не ждём, пока палец упрётся в физический край тройного списка. Незаметно
-      // переносим ту же цифру в среднюю копию и даём продолжить жест.
       if (rawIndex < values.length / 2 || rawIndex >= values.length * 2.5) {
         rawIndex = values.length + logicalIndex;
         element.scrollTop = rawIndex * ITEM;
@@ -67,12 +56,9 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
         onChange(next);
       }
     }
-    // Когда событий нет 140 мс, прокрутка закончилась. Если браузер не умеет
-    // прилипание к строкам, колесо доводим до выбранной строки сами.
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       if (picking.current !== null) {
-        // Поездка к нажатой строке закончилась или прервалась — ставим колесо ровно на неё.
         const target = picking.current;
         picking.current = null;
         moveTo(target);
@@ -82,7 +68,6 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
     }, 140);
   };
 
-  /** Тап по строке выбирает её сразу, а прокрутка лишь показывает выбор. */
   const pick = (target: number, renderedIndex: number) => {
     shown.current = target;
     onChange(target);
@@ -94,7 +79,6 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
     element.scrollTo({ top, behavior: 'smooth' });
   };
 
-  // Человек взялся за колесо сам — тап больше не главный, промежуточные строки снова выбираются.
   const takeOver = () => {
     picking.current = null;
   };
@@ -128,7 +112,6 @@ function Wheel({ label, values, value, onChange }: WheelProps) {
         held.current = false;
       }}
     >
-      {/* Пустые поля сверху и снизу нужны, чтобы первую и последнюю строку можно было поставить по центру. */}
       <div className="wheel__pad" aria-hidden="true" />
       {loop.map((item, index) => {
         const accessible = index >= values.length && index < values.length * 2;
@@ -157,25 +140,17 @@ interface TimeFieldProps {
   hint?: string;
 }
 
-/**
- * Время «как в айфоне»: строка со значением, по нажатию под ней раскрываются колёса
- * часов и минут. Печатать не нужно, поэтому нечего стирать и нельзя ввести неверное.
- */
 export function TimeField({ label, value, onChange, hint }: TimeFieldProps) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const known = isValidTime(value);
   const [hours, minutes] = (known ? value : '09:00').split(':').map(Number);
 
-  // Два колеса могут сдвинуться в одном кадре, до перерисовки. Поэтому время собираем из
-  // последнего отданного значения, а не из значения прошлой отрисовки: иначе второе
-  // колесо затрёт ход первого.
   const current = useRef(value);
   useEffect(() => {
     current.current = value;
   }, [value]);
 
-  // Раскрытым бывает одно поле: два колеса подряд не помещаются в форму.
   useEffect(() => {
     const closeIfOther = (event: Event) => {
       if ((event as CustomEvent<string>).detail !== id) setOpen(false);

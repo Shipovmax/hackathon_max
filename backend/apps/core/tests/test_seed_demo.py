@@ -16,8 +16,6 @@ WEDNESDAY = dt.date(2026, 9, 23)
 
 
 class DemoDataFileTests(TestCase):
-    """testdata/demo_network.json — это тестовые данные для проверки, в них не должно быть висячих ссылок."""
-
     def test_every_reference_in_the_file_points_to_something_real(self):
         data = load_demo_data()
         stores = {item["name"] for item in data["stores"]}
@@ -52,7 +50,6 @@ class SeedDemoTests(TestCase):
         self.assertEqual(Employee.objects.filter(status=EmployeeStatus.ACTIVE).count(), len(data["staff"]))
         self.assertEqual(Employee.objects.filter(status=EmployeeStatus.DISMISSED).count(), len(data["dismissed"]))
         self.assertEqual(TaskTemplate.objects.count(), len(data["stores"]) * len(data["task_templates"]))
-        # Текущая неделя опубликована, следующая — черновик.
         monday = WEDNESDAY - dt.timedelta(days=2)
         self.assertTrue(Shift.objects.filter(date__lt=monday + dt.timedelta(days=7), status=ShiftStatus.PUBLISHED).exists())
         self.assertFalse(Shift.objects.filter(date__gte=monday + dt.timedelta(days=7), status=ShiftStatus.PUBLISHED).exists())

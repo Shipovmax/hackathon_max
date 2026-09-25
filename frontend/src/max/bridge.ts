@@ -24,10 +24,6 @@ declare global {
 
 export const getInitData = (): string => window.WebApp?.initData ?? '';
 
-/**
- * Диплинк из уведомления владельцу: https://max.ru/<ник>?startapp=store_3 или
- * store_3_20260921 — открываем сразу карточку точки за нужный день.
- */
 export function startRoute(): string | null {
   const payload = window.WebApp?.initDataUnsafe?.start_param ?? '';
   const match = /^store_(\d+)(?:_(\d{4})(\d{2})(\d{2}))?$/.exec(payload);
@@ -38,8 +34,6 @@ export function startRoute(): string | null {
 export const getPlatform = (): WebAppPlatform => window.WebApp?.platform ?? 'web';
 export const isInsideMax = (): boolean => Boolean(window.WebApp?.initData);
 
-// Обработчики «Назад» складываются в стопку: сработает верхний. Так открытая форма
-// закрывается по «Назад», а не уводит пользователя с экрана.
 const handlers: (() => void)[] = [];
 const dispatch = () => handlers[handlers.length - 1]?.();
 let attached = false;
@@ -71,7 +65,6 @@ export function useBackButton(onBack: (() => void) | null): void {
   }, [onBack]);
 }
 
-/** Тема MAX меняется на ходу, приложение должно перекрашиваться вместе с ней. */
 export function watchColorScheme(onChange: (scheme: 'light' | 'dark') => void): () => void {
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   const listener = () => onChange(media.matches ? 'dark' : 'light');

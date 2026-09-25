@@ -11,7 +11,6 @@ interface EmptyProps {
   children?: ReactNode;
 }
 
-/** Пустой экран объясняет, что здесь появится и что для этого сделать. */
 export function Empty({ icon, title, text, action, children }: EmptyProps) {
   return (
     <div className="empty">

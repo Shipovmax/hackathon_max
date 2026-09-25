@@ -28,9 +28,6 @@ class TaskTemplate(models.Model):
     title = models.CharField(max_length=200)
     kind = models.CharField(max_length=16, choices=TaskKind.choices, default=TaskKind.DAILY)
     planned_time = models.TimeField()
-    # С какого момента задачу вообще можно отметить. Без этой границы закрытие смены,
-    # запланированное на 22:00, закрывалось бы в час дня. По умолчанию ограничения нет —
-    # осмысленное окно ставит тот, кто заводит задачу; из приложения оно приходит всегда.
     available_from = models.TimeField(default=time.min)
     on_date = models.DateField(null=True, blank=True)
     tolerance_minutes = models.PositiveSmallIntegerField(default=15)
@@ -38,8 +35,6 @@ class TaskTemplate(models.Model):
     requires_claim = models.BooleanField(default=False)
     photo_prompt = models.CharField(max_length=200, blank=True)
     is_active = models.BooleanField(default=True)
-    # По этой отметке планировщик видит, что владелец правил задачи точки среди дня,
-    # и рассылает смене обновлённый список. Снятие галочки «активна» тоже её двигает.
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -64,8 +59,6 @@ class TaskInstance(models.Model):
     status = models.CharField(
         max_length=16, choices=TaskStatus.choices, default=TaskStatus.SCHEDULED
     )
-    # Два напоминания перед сроком: первое за REMINDER_FIRST_MINUTES_BEFORE, последнее за
-    # REMINDER_FINAL_MINUTES_BEFORE. Отметки нужны, чтобы тик планировщика не слал их повторно.
     reminder_sent_at = models.DateTimeField(null=True, blank=True)
     final_reminder_sent_at = models.DateTimeField(null=True, blank=True)
     escalation_sent_at = models.DateTimeField(null=True, blank=True)
@@ -75,8 +68,6 @@ class TaskInstance(models.Model):
         Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
     awaiting_photo_since = models.DateTimeField(null=True, blank=True)
-    # Идентификаторы сообщений «Кто принимает?» у каждого из смены. Когда задачу берут,
-    # бот правит эти сообщения и убирает кнопку «Беру», чтобы её нельзя было нажать зря.
     claim_prompt_mids = models.JSONField(default=list, blank=True)
 
     class Meta:

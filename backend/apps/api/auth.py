@@ -20,7 +20,6 @@ class InitDataError(Exception):
 def validate_init_data(
     init_data: str, bot_token: str, *, max_age_seconds: int, now: float | None = None
 ) -> dict:
-    """Verify window.WebApp.initData as described in dev.max.ru/docs/webapps/validation and return its fields."""
     pairs = []
     for chunk in init_data.split("&"):
         if chunk:
@@ -82,7 +81,7 @@ class MaxInitDataAuthentication(BaseAuthentication):
         account, _ = MaxAccount.objects.get_or_create(
             max_user_id=user["id"], defaults={"first_name": user.get("first_name") or ""}
         )
-        if account.role != Role.OWNER:
+        if account.role != Role.OWNER and not Network.objects.filter(owner=account).exists():
             raise PermissionDenied(
                 {"code": "not_owner", "detail": "The mini-app is available to owners only"}
             )
@@ -93,16 +92,6 @@ REVIEW_NETWORK_NAME = "Сеть для проверки"
 
 
 class ReviewTokenAuthentication(BaseAuthentication):
-    """
-    Вход для автоматической проверки хакатона (DATA-API.yaml).
-
-    Робот проверки не открывает мини-приложение в MAX и не может подписать initData:
-    для этого нужен токен бота. Поэтому ему выдаётся отдельный токен REVIEW_API_TOKEN,
-    и запрос с `Authorization: Bearer <токен>` работает от имени тестового владельца
-    REVIEW_OWNER_MAX_ID. У этого владельца своя сеть, до чужих точек он не достаёт.
-    Пустой REVIEW_API_TOKEN выключает этот вход.
-    """
-
     keyword = "Bearer"
 
     def authenticate_header(self, request):
