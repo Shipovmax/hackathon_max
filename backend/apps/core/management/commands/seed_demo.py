@@ -9,6 +9,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.core.models import (
@@ -38,6 +39,17 @@ def load_demo_data(path: Path = DATA_FILE) -> dict:
 
 def parse_hhmm(value: str) -> dt.time:
     return dt.datetime.strptime(value, "%H:%M").time()
+
+
+def monday_of(day: dt.date) -> dt.date:
+    return day - dt.timedelta(days=day.weekday())
+
+
+def schedule_weeks(data: dict, today: dt.date) -> tuple[dt.date, dt.date]:
+    period = data["review_period"]
+    start = min(today, dt.date.fromisoformat(period["from"]))
+    end = max(today, dt.date.fromisoformat(period["to"]))
+    return monday_of(start), monday_of(end) + dt.timedelta(days=7)
 
 
 def demo_photo_png(width: int = 360, height: int = 480) -> bytes:
@@ -93,8 +105,10 @@ class Command(BaseCommand):
         today = timezone.localdate()
         stores = {item["name"]: self.make_store(network, item, data["timezone"]) for item in data["stores"]}
         employees = self.make_employees(stores, data)
-        self.make_templates(stores, data["task_templates"], today)
-        shifts = self.make_shifts(stores, employees, data, today)
+        deliveries = sorted({today} | {dt.date.fromisoformat(day) for day in data["deliveries"]})
+        self.make_templates(stores, data["task_templates"], deliveries)
+        first_monday, draft_monday = schedule_weeks(data, today)
+        shifts = self.make_shifts(stores, employees, data, first_monday, draft_monday)
         busy = data["today"]
         self.make_today_tasks(stores[busy["store"]], employees[busy["performer"]], busy["tasks"], today)
         for name, store in stores.items():
@@ -103,6 +117,10 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"Сеть «{network.name}» владельца {owner.max_user_id} готова"))
         self.stdout.write(f"Точек: {len(stores)}, сотрудников: {len(employees)}, смен: {shifts}")
+        last_day = draft_monday - dt.timedelta(days=1)
+        self.stdout.write(f"График опубликован: {first_monday:%d.%m.%Y} – {last_day:%d.%m.%Y}")
+        self.stdout.write(f"Черновик: {draft_monday:%d.%m.%Y} – {draft_monday + dt.timedelta(days=6):%d.%m.%Y}")
+        self.stdout.write("Поставки: " + ", ".join(f"{day:%d.%m}" for day in deliveries))
         self.stdout.write("\nКоды приглашения (отправить боту, чтобы привязать сотрудника):")
         for employee in Employee.objects.filter(store__network=network, account__isnull=True).order_by("store", "name"):
             code = employee.invites.filter(used_at__isnull=True).first()
@@ -166,56 +184,61 @@ class Command(BaseCommand):
                 self.stdout.write(f"Добавлен уволенный сотрудник {person['name']} (история сохраняется)")
         return result
 
-    def make_templates(self, stores: dict[str, Store], templates: list[dict], today: dt.date) -> None:
+    def make_templates(self, stores: dict[str, Store], templates: list[dict], deliveries: list[dt.date]) -> None:
         for store in stores.values():
             for item in templates:
                 planned = parse_hhmm(item["planned_time"])
-                one_time = item["kind"] == TaskKind.ONE_TIME
-                template, _ = TaskTemplate.objects.get_or_create(
-                    store=store,
-                    title=item["title"],
-                    defaults={
-                        "kind": item["kind"],
-                        "planned_time": planned,
-                        "available_from": earlier(planned, DEMO_LEAD_MINUTES),
-                        "on_date": today if one_time else None,
-                        "tolerance_minutes": item["tolerance_minutes"],
-                        "requires_photo": item["requires_photo"],
-                        "requires_claim": item["requires_claim"],
-                        "photo_prompt": item["photo_prompt"],
-                    },
-                )
-                if one_time and template.on_date != today:
-                    template.on_date = today
-                    template.save(update_fields=["on_date"])
+                dates = deliveries if item["kind"] == TaskKind.ONE_TIME else [None]
+                for on_date in dates:
+                    TaskTemplate.objects.get_or_create(
+                        store=store,
+                        title=item["title"],
+                        on_date=on_date,
+                        defaults={
+                            "kind": item["kind"],
+                            "planned_time": planned,
+                            "available_from": earlier(planned, DEMO_LEAD_MINUTES),
+                            "tolerance_minutes": item["tolerance_minutes"],
+                            "requires_photo": item["requires_photo"],
+                            "requires_claim": item["requires_claim"],
+                            "photo_prompt": item["photo_prompt"],
+                        },
+                    )
 
-    def make_shifts(self, stores: dict[str, Store], employees: dict[str, Employee], data: dict, today: dt.date) -> int:
+    def make_shifts(
+        self,
+        stores: dict[str, Store],
+        employees: dict[str, Employee],
+        data: dict,
+        first_monday: dt.date,
+        draft_monday: dt.date,
+    ) -> int:
         count = 0
-        monday = today - dt.timedelta(days=today.weekday())
-        current_week_only = {(item["name"], item["weekday"]): (item["start"], item["end"]) for item in data["current_week_only"]}
-        Shift.objects.filter(
-            store__in=stores.values(), date__gte=monday, date__lt=monday + dt.timedelta(days=14)
-        ).delete()
+        published_only = {
+            (item["name"], item["weekday"]): (item["start"], item["end"]) for item in data["published_weeks_only"]
+        }
+        end = draft_monday + dt.timedelta(days=7)
+        Shift.objects.filter(store__in=stores.values(), date__gte=first_monday, date__lt=end).delete()
         for person in data["staff"]:
             employee = employees[person["name"]]
             pattern = {int(day): hours for day, hours in person["shifts"].items()}
-            for offset in range(14):
-                date = monday + dt.timedelta(days=offset)
-                current_week = offset < 7
+            for offset in range((end - first_monday).days):
+                date = first_monday + dt.timedelta(days=offset)
+                published = date < draft_monday
                 hours = pattern.get(date.weekday())
-                if current_week:
-                    hours = hours or current_week_only.get((person["name"], date.weekday()))
+                if published:
+                    hours = hours or published_only.get((person["name"], date.weekday()))
                 if not hours:
                     continue
-                start, end = hours
+                start, finish = hours
                 _, created = Shift.objects.get_or_create(
                     employee=employee,
                     store=stores[person["store"]],
                     date=date,
                     defaults={
                         "start_time": parse_hhmm(start),
-                        "end_time": parse_hhmm(end),
-                        "status": ShiftStatus.PUBLISHED if current_week else ShiftStatus.DRAFT,
+                        "end_time": parse_hhmm(finish),
+                        "status": ShiftStatus.PUBLISHED if published else ShiftStatus.DRAFT,
                     },
                 )
                 count += int(created)
@@ -240,7 +263,9 @@ class Command(BaseCommand):
     def make_today_tasks(self, store: Store, performer: Employee, states: dict, today: dt.date) -> None:
         tz = ZoneInfo(store.timezone)
         now = timezone.now().astimezone(tz)
-        for template in TaskTemplate.objects.filter(store=store):
+        for template in TaskTemplate.objects.filter(store=store).filter(
+            Q(kind=TaskKind.DAILY) | Q(on_date=today)
+        ):
             state = states.get(template.title, {"status": TaskStatus.SCHEDULED})
             done_at = dt.datetime.combine(today, parse_hhmm(state["done_at"]), tzinfo=tz) if "done_at" in state else None
             if done_at is not None and done_at > now:

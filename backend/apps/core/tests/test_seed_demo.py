@@ -22,7 +22,10 @@ class DemoDataFileTests(TestCase):
         staff = {item["name"] for item in data["staff"]}
         titles = {item["title"] for item in data["task_templates"]}
         self.assertTrue({item["store"] for item in data["staff"] + data["dismissed"]} <= stores)
-        self.assertTrue({item["name"] for item in data["current_week_only"]} <= staff)
+        self.assertTrue({item["name"] for item in data["published_weeks_only"]} <= staff)
+        period = data["review_period"]
+        self.assertLess(period["from"], period["to"])
+        self.assertTrue(all(period["from"] <= day <= period["to"] for day in data["deliveries"]))
         self.assertIn(data["today"]["store"], stores)
         self.assertIn(data["today"]["performer"], staff)
         self.assertTrue(set(data["today"]["tasks"]) <= titles)
@@ -49,10 +52,30 @@ class SeedDemoTests(TestCase):
         self.assertEqual(Store.objects.count(), len(data["stores"]))
         self.assertEqual(Employee.objects.filter(status=EmployeeStatus.ACTIVE).count(), len(data["staff"]))
         self.assertEqual(Employee.objects.filter(status=EmployeeStatus.DISMISSED).count(), len(data["dismissed"]))
-        self.assertEqual(TaskTemplate.objects.count(), len(data["stores"]) * len(data["task_templates"]))
-        monday = WEDNESDAY - dt.timedelta(days=2)
-        self.assertTrue(Shift.objects.filter(date__lt=monday + dt.timedelta(days=7), status=ShiftStatus.PUBLISHED).exists())
-        self.assertFalse(Shift.objects.filter(date__gte=monday + dt.timedelta(days=7), status=ShiftStatus.PUBLISHED).exists())
+        daily = sum(1 for item in data["task_templates"] if item["kind"] == "daily")
+        deliveries = len(set(data["deliveries"]) | {WEDNESDAY.isoformat()})
+        self.assertEqual(TaskTemplate.objects.count(), len(data["stores"]) * (daily + deliveries))
+
+    def test_review_period_is_covered_by_published_shifts_and_deliveries(self):
+        self.seed()
+        data = load_demo_data()
+        start = dt.date.fromisoformat(data["review_period"]["from"])
+        end = dt.date.fromisoformat(data["review_period"]["to"])
+        for offset in range((end - start).days + 1):
+            day = start + dt.timedelta(days=offset)
+            for store in Store.objects.all():
+                with self.subTest(day=day, store=store.name):
+                    self.assertTrue(
+                        Shift.objects.filter(store=store, date=day, status=ShiftStatus.PUBLISHED).exists()
+                    )
+        for day in data["deliveries"]:
+            self.assertEqual(TaskTemplate.objects.filter(title="Приёмка поставки", on_date=day).count(), 3)
+        # Неделя после периода — черновик: на ней проверка покрытия находит незакрытый четверг.
+        draft_monday = end - dt.timedelta(days=end.weekday()) + dt.timedelta(days=7)
+        drafts = Shift.objects.filter(date__gte=draft_monday)
+        self.assertTrue(drafts.exists())
+        self.assertFalse(drafts.filter(status=ShiftStatus.PUBLISHED).exists())
+        self.assertFalse(Shift.objects.filter(date__lt=draft_monday, status=ShiftStatus.DRAFT).exists())
 
     def test_today_at_the_busy_store_matches_the_mockup(self):
         self.seed(hour=15)
