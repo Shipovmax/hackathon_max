@@ -66,6 +66,12 @@ class TextsTests(SimpleTestCase):
         self.assertIn("Задача «Открытие магазина», плановое время 09:00.", text)
         self.assertIn("задача принимается до 09:15", text)
         self.assertIn("не придёт за 10 минут", text)
+        self.assertIn("без покупателей и посторонних людей в кадре", text)
+
+    def test_employee_learns_what_the_owner_sees_when_joining(self):
+        text = texts.code_accepted("Ленина, 14")
+        self.assertTrue(text.startswith("Готово. Вы подключены к точке Ленина, 14."))
+        self.assertIn("видит ваше имя, время отметок задач и присланные фото", text)
 
     def test_parse_callback(self):
         self.assertEqual(keyboards.parse_callback("done:42"), ("done", "42"))

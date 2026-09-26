@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.http import FileResponse, Http404
+from django.shortcuts import render
 
 
 def spa_index(request, *args, **kwargs):
@@ -9,3 +10,7 @@ def spa_index(request, *args, **kwargs):
     response = FileResponse(index.open("rb"), content_type="text/html; charset=utf-8")
     response["Cache-Control"] = "no-cache"
     return response
+
+
+def privacy(request):
+    return render(request, "privacy.html")

@@ -1,3 +1,6 @@
+from django.conf import settings
+
+
 def plural_ru(n: int, forms: tuple[str, str, str]) -> str:
     n = abs(n) % 100
     if 11 <= n <= 14:
@@ -18,11 +21,24 @@ def tasks_word(n: int) -> str:
     return plural_ru(n, ("задачи", "задач", "задач"))
 
 
-ROLE_PROMPT = "Кто вы: владелец сети или сотрудник магазина?"
+PRIVACY_URL = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/privacy/" if settings.PUBLIC_BASE_URL else ""
+
+
+def with_privacy(text: str, lead: str, url: str = PRIVACY_URL) -> str:
+    return f"{text}\n\n{lead}: {url}" if url else text
+
+
+ROLE_PROMPT = with_privacy(
+    "Кто вы: владелец сети или сотрудник магазина?",
+    "Продолжая, вы соглашаетесь с политикой обработки персональных данных",
+)
 DEFAULT_NETWORK_NAME = "Моя сеть"
 ROLE_OWNER_CHOSEN = "Вы владелец. Настройки и сводка по точкам — в приложении."
 OPEN_APP_PROMPT = "Откройте приложение, чтобы добавить точки, сотрудников и график."
-ROLE_EMPLOYEE_ASK_CODE = "Отправьте код, который вам дал владелец."
+ROLE_EMPLOYEE_ASK_CODE = with_privacy(
+    "Отправьте код, который вам дал владелец.",
+    "Отправляя код, вы соглашаетесь с политикой обработки персональных данных",
+)
 CODE_INVALID = "Код не найден или уже использован. Попросите у владельца новый."
 WELCOME_BACK_OWNER = "Вы владелец. Сводка по точкам — в приложении."
 WELCOME_BACK_EMPLOYEE = "Вы подключены. Напишите «что осталось», чтобы увидеть задачи на смену."
@@ -43,7 +59,11 @@ BOARD_HINT = "Отметьте задачу кнопкой под сообщен
 
 
 def code_accepted(store_name: str) -> str:
-    return f"Готово. Вы подключены к точке {store_name}."
+    return (
+        f"Готово. Вы подключены к точке {store_name}.\n\n"
+        "Владелец точки видит ваше имя, время отметок задач и присланные фото. "
+        "Эти данные нужны только для контроля задач смены."
+    )
 
 
 def shift_board(
@@ -129,6 +149,7 @@ def ask_photo_for(
     return (
         f"Задача «{task_title}», плановое время {planned}.\n\n"
         f"{what}\n"
+        f"Снимайте зал, товар или документы — без покупателей и посторонних людей в кадре.\n"
         f"Одним сообщением в этот чат. Отметка встанет на момент получения фото, "
         f"задача принимается до {deadline}.\n"
         f"Если фото не придёт за {minutes(wait_minutes)}, задача снова станет открытой "
