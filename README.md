@@ -136,6 +136,29 @@ curl -H "Authorization: Bearer <REVIEW_API_TOKEN>" http://localhost:8000/api/das
 - Node 22: [frontend/package.json](frontend/package.json) и `package-lock.json` — React 19.2.8, `@maxhub/max-ui`, Vite. Версии зафиксированы.
 - Все библиотеки с открытыми лицензиями.
 
+**В Docker** зависимости ставятся сами при `docker compose up --build`: образ выполняет `pip install -r requirements.txt` для бэкенда и `npm ci` по `frontend/package-lock.json` для мини-приложения, затем собирает его (`npm run build`).
+
+**Без Docker** (нужны Python 3.13 и Node 22):
+
+```bash
+# бэкенд (из корня репозитория)
+cp .env.example .env            # Windows: copy .env.example .env; DJANGO_DEBUG=1 уже стоит
+cd backend
+python -m venv .venv
+.venv/Scripts/activate          # Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py runserver      # http://localhost:8000
+
+# мини-приложение, в другом терминале
+cd frontend
+npm ci                          # ставит версии ровно из package-lock.json
+cp .env.example .env            # VITE_USE_MOCKS=1: экраны на демо-данных, без бэкенда и MAX
+npm run dev                     # http://localhost:5173
+```
+
+Чтобы Django на порту 8000 отдавал мини-приложение, соберите его: `npm run build` в `frontend`.
+
 ## Внешние сервисы и интеграции
 
 - **MAX Bot API** (`platform-api2.max.ru`): получение событий бота (Long Polling), отправка и правка сообщений, ответы на кнопки, загрузка фото. Сертификат API подписан корневым сертификатом Минцифры — он лежит в [certs/](certs/) и подключается в клиенте бота.
